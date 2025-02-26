@@ -20,6 +20,17 @@ const productData = [
       rating: 5,
       timeLeft: 24,
       appLink: "https://play.google.com/store/apps/details?id=app.fixbuild.MtkGenuineProV2"
+    },
+    {
+      id: 2,
+      name: "MTK PANEL V24",
+      image:
+        "https://i.ibb.co/qLsDNCVN/icon-icon.png",
+      productType: "openBackHeadphones",
+      description: ["PANEL SITE"],
+      rating: 5,
+      timeLeft: 24,
+      appLink: "https://panelvip.co.uk/mtk-panel.apk"
     }
    // {
    //   id: 3,
