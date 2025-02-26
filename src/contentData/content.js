@@ -28,7 +28,7 @@ const productData = [
         "https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["PANEL SITE"],
-      rating: 5,
+      rating: 7,
       timeLeft: 24,
       appLink: "https://panelvip.co.uk/mtk-panel.apk"
     }
