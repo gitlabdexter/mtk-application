@@ -19,7 +19,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://play.google.com/store/apps/details?id=app.fixbuild.MtkGenuineProV2"
+      appLink: "https://panelvip.co.uk/appmtk-release.apk"
     },
     {
       id: 2,
