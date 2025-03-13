@@ -1,7 +1,7 @@
 const productData = [
     {
       id: 1,
-      name: "MTK AIO",
+      name: "MTK GENUINE PRO",
       image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
@@ -11,13 +11,13 @@ const productData = [
     },
     {
       id: 2,
-      name: "MTK GENUINE PRO",
+      name: "MTK GENUINE VIP",
       image:"https://i.ibb.co/0RffdrVp/app-main-logo.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://panelvip.co.uk/appmtk-release.apk"
+      appLink: "https://panelvip.co.uk/mtk-release.apk"
     },
     {
       id: 2,
