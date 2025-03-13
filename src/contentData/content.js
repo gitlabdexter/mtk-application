@@ -2,8 +2,7 @@ const productData = [
     {
       id: 1,
       name: "MTK AIO",
-      image:
-        "https://i.ibb.co/qLsDNCVN/icon-icon.png",
+      image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
       rating: 5,
@@ -13,8 +12,7 @@ const productData = [
     {
       id: 2,
       name: "MTK GENUINE PRO",
-      image:
-        "https://i.ibb.co/0RffdrVp/app-main-logo.png",
+      image:"https://i.ibb.co/0RffdrVp/app-main-logo.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
@@ -24,8 +22,7 @@ const productData = [
     {
       id: 2,
       name: "MTK PANEL V24",
-      image:
-        "https://i.ibb.co/qLsDNCVN/icon-icon.png",
+      image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["PANEL SITE"],
       rating: 5,
