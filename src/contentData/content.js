@@ -14,7 +14,7 @@ const productData = [
       id: 2,
       name: "MTK GENUINE PRO",
       image:
-        "https://ibb.co/hJKKtV1x/app_main_logo.png",
+        "https://i.ibb.co/0RffdrVp/app-main-logo.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
