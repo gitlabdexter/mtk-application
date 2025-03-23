@@ -7,7 +7,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
       rating: 5,
       timeLeft: 27,
-      appLink: "https://panelvip.co.uk/fix-115-release.apk"
+      appLink: "https://panelvip.co.uk/fix-117-release.apk"
     },
     {
       id: 2,
