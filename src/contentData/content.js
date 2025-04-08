@@ -7,7 +7,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
       rating: 5,
       timeLeft: 27,
-      appLink: "https://panelvip.co.uk/fix-118-release.apk"
+      appLink: "https://adminvpn.site/fix-118-release.apk"
     },
     {
       id: 2,
@@ -17,7 +17,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://panelvip.co.uk/mtk-release.apk"
+      appLink: "https://adminvpn.site/mtk-release.apk"
     },
     {
       id: 2,
@@ -27,7 +27,7 @@ const productData = [
       description: ["PANEL SITE"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://panelvip.co.uk/mtk-panel.apk"
+      appLink: "https://adminvpn.site/mtk-panel.apk"
     }
    // {
    //   id: 3,
