@@ -17,8 +17,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://adminvpn.site/appmtk-release.apk
-"
+      appLink: "https://adminvpn.site/appmtk-release.apk"
     },
     {
       id: 2,
