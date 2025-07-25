@@ -7,7 +7,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
       rating: 5,
       timeLeft: 27,
-      appLink: "https://mtkapi.site/fix-118-release.apk"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/fix-118-release.apk"
     },
     {
       id: 2,
@@ -17,7 +17,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://mtkapi.site/mtkgenuine-release.apk"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release.apk"
     },
     {
       id: 3,
@@ -27,7 +27,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://mtkapi.site/mtkrm-release.apk"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkrm-release.apk"
     }
    // {
    //   id: 3,
