@@ -20,14 +20,14 @@ const productData = [
       appLink: "https://mtkapi.site/mtkgenuine-release.apk"
     },
     {
-      id: 2,
-      name: "MTK PANEL V24",
+      id: 3,
+      name: "MTK RM",
       image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
-      description: ["PANEL SITE"],
+      description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://mtkapi.site/mtk-panel.apk"
+      appLink: "https://mtkapi.site/mtkrm-release.apk"
     }
    // {
    //   id: 3,
