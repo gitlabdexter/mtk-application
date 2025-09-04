@@ -8,16 +8,16 @@ const productData = [
       rating: 5,
       timeLeft: 27,
       appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/fix-119-release.apk"
-   // },
-   // {
-   //   id: 2,
-   //   name: "MTK GENUINE VIP",
-   //   image:"https://i.ibb.co/0RffdrVp/app-main-logo.png",
-   //   productType: "openBackHeadphones",
-   //   description: ["OVPN", "UDP", "V2RAY"],
-   //   rating: 5,
-   //   timeLeft: 24,
-   //   appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release.apk"
+    },
+    {
+      id: 2,
+      name: "MTK GENUINE VIP",
+      image:"https://i.ibb.co/0RffdrVp/app-main-logo.png",
+      productType: "openBackHeadphones",
+      description: ["OVPN", "UDP", "V2RAY"],
+      rating: 5,
+     timeLeft: 24,
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release.apk"
    // },
    // {
    //   id: 3,
