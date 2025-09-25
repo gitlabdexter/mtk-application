@@ -7,7 +7,7 @@ const productData = [
       description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
       rating: 5,
       timeLeft: 27,
-      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/fix-119-release.apk"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkprotunnel-release.apk"
     },
     {
       id: 2,
