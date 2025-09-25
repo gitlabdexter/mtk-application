@@ -19,16 +19,16 @@ const productData = [
       timeLeft: 24,
       appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release.apk"
       //appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release1.apk"
-   // },
-   // {
-   //   id: 3,
-   //   name: "MTK RM",
-   //   image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
-   //   productType: "openBackHeadphones",
-    //  description: ["OVPN", "UDP", "V2RAY"],
-    //  rating: 5,
-    //  timeLeft: 24,
-    //  appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkrm-release.apk"
+    },
+    {
+      id: 3,
+      name: "MEDIATEK OVPN",
+      image:"https://i.ibb.co/qLsDNCVN/icon-icon.pn",
+      productType: "openBackHeadphones",
+      description: ["OVPN"],
+      rating: 5,
+      timeLeft: 24,
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/MediatekOvpn.apk?inline=false"
     }
    // {
    //   id: 3,
