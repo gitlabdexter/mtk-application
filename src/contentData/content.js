@@ -23,7 +23,7 @@ const productData = [
     {
       id: 3,
       name: "MEDIATEK OVPN",
-      image:"https://i.ibb.co/qLsDNCVN/icon-icon.pn",
+      image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["OVPN"],
       rating: 5,
