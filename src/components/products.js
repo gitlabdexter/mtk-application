@@ -1,31 +1,53 @@
+import { useState, useEffect } from 'react';
 import { FaStar } from 'react-icons/fa';
-// import { Link } from 'react-router-dom';
 
 export function Products(props) {
+  const { id, image, name, description, appLink, timeLeft, rating } = props;
+
+  // Load initial downloads from localStorage
+  const [downloads, setDownloads] = useState(() => {
+    const saved = localStorage.getItem(`downloads_${id}`);
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
+  // Save downloads count to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem(`downloads_${id}`, downloads);
+  }, [id, downloads]);
+
+  // Handle download click
+  const handleDownload = () => {
+    setDownloads(prev => prev + 1);
+    window.open(appLink, '_blank'); // open download link
+  };
+
   return (
     <div className='productList'>
-      <div key={props.id} className='productCard'>
-        <img src={props.image} alt='app-img' className='productImage' />
+      <div className='productCard'>
+        <img src={image} alt='app-img' className='productImage' />
         <div className='productCard__content'>
-          <h3 className='productName'>{props.name}</h3>
+          <h3 className='productName'>{name}</h3>
           <div className='displayStack__1'>
-          <select className='productPrice'>
-              {props.description.map((desOption, index) => (
+            <select className='productPrice'>
+              {description.map((desOption, index) => (
                 <option key={index} value={desOption}>
                   {desOption}
                 </option>
               ))}
             </select>
             <div className='productRating'>
-              {[...Array(props.rating)].map((_, index) => (
+              {[...Array(rating)].map((_, index) => (
                 <FaStar id={index + 1} key={index} />
               ))}
             </div>
           </div>
           <div className='displayStack__2'>
-          <a className='appLink' href={props.appLink}>
-            <button className='productTime'>DOWNLOAD</button>
-            </a>
+            <button className='productTime' onClick={handleDownload}>
+              DOWNLOAD
+            </button>
+            <p className="download-text">
+              Client Downloads: {downloads}
+            </p>
           </div>
         </div>
       </div>
