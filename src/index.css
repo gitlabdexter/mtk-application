@@ -2,7 +2,7 @@
   --color-grey-primary: #f0f0f0;
   --color-yellow-primary: goldenrod;
   --color-orange-primary: darkorange;
-  --color-green-primary: #fc2a0d;
+  --color-green-primary: #FF1493;
   --background-color: #fff;
   /* Background color */
   --text-color: #232323;
@@ -17,13 +17,13 @@
   /* Shadow color */
   --hover-color: rgba(255, 255, 255, 0.95);
   /* Hover background color */
-  --button-background: #fc2a0d;
+  --button-background: #FF1493;
   /* Button background color */
-  --button-hover-background: #fc2a0d;
+  --button-hover-background: #FF1493;
   /* Button hover background color */
   --button-text-color: #fff;
   /* Button text color */
-  --button-border-color: #fc2a0d;
+  --button-border-color: #FF1493;
   /* Button border color */
   --button-border-radius: 0.8rem;
   /* Button border radius */
@@ -64,6 +64,14 @@ body {
   box-shadow: 0 8px 8px var(--shadow-color);
 }
 
+.download-text {
+  margin-top: 8px;
+  font-size: 14px;
+  color: gray;
+  width: 100%;
+  text-align: center;      
+}
+
 .navbar .logo {
   font-size: 1.5rem;
   font-weight: bold;
@@ -94,6 +102,15 @@ body {
   background-position: center;
   z-index: -2; /* Ensure background is below overlay and content */
 }
+
+.downloadCount {
+  font-size: 13px;
+  color: #555;       /* subtle grey */
+  margin-top: 6px;
+  text-align: right; /* aligns nicely under the button */
+  font-style: italic;
+}
+
 
 .container::after {
   content: "";
