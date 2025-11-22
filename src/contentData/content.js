@@ -11,13 +11,13 @@ const productData = [
     },
     {
       id: 2,
-      name: "MTK GENUINE VIP",
-      image:"https://i.ibb.co/0RffdrVp/app-main-logo.png",
+      name: "MTK GENUINE PRO",
+      image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release.apk"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtk-new.apk"
       //appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release1.apk"
     },
     {
