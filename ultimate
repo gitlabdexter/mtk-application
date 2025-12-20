@@ -1,0 +1,2022 @@
+#!/bin/bash
+#====================================================
+#   Ultimate VPN Installer Script
+#   Supports: OpenVPN, Hysteria, Xray Vless/Vmess, etc.
+#====================================================
+HOST='185.61.137.174';
+USER='firenetv_premiumpanel';
+PASS='firenetv_premiumpanel';
+DBNAME='firenetv_premiumpanel';
+
+
+# Create database config for VPN panel integration
+mkdir -p /etc/xray /etc/firenet /root
+cat > /etc/.db-base << 'DBEOF'
+HOST='185.61.137.174'
+USER='firenetv_premiumpanel'
+PASS='firenetv_premiumpanel'
+DBNAME='firenetv_premiumpanel'
+API_KEY='azimaxus'
+PANEL_URL='https://mtkapi.site/'
+DB='firenetv_premiumpanel'
+DBEOF
+chmod 600 /etc/.db-base
+cp /etc/.db-base /root/.db-base
+cp /etc/.db-base /etc/xray/.db-base 2>/dev/null || true
+cp /etc/.db-base /etc/openvpn/login/config.sh 2>/dev/null || true
+
+# Setup web server for server info
+mkdir -p /var/www/html
+cat > /etc/systemd/system/serverinfo.service << 'SRVEOF'
+[Unit]
+Description=Server Info Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/html
+ExecStart=/usr/bin/python3 -m http.server 5623
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SRVEOF
+systemctl daemon-reload
+systemctl enable serverinfo
+systemctl start serverinfo
+
+PORT_TCP='1194';
+PORT_UDP='110';
+PORT_SSL='443';
+OBFS='mtk';
+HYSTERIA_TYPE='default';
+API_LINK="https://mtkvip.store/api/authentication"
+API_KEY="azimaxus"
+DOMAIN="v1.mtk-tunnel.xyz"
+NS="v2.mtk-tunnel.xyzz"
+AUTHSTR="${AUTHSTR:-admin123}"
+
+#---------------[ Timezone ]-------------------------
+timedatectl set-timezone Asia/Manila
+
+#====================================================
+#   Install Sudo & User
+#====================================================
+install_sudo(){
+# Create user if not exists
+if ! id "azimaxus" &>/dev/null; then
+useradd -m -s /bin/bash azimaxus
+echo "azimaxus:admin.mtk" | chpasswd
+usermod -aG sudo azimaxus
+fi
+
+# Disable root SSH login
+ sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+
+# Ensure AllowGroups is set only once
+if ! grep -q "^AllowGroups azimaxus" /etc/ssh/sshd_config; then
+echo "AllowGroups azimaxus" >> /etc/ssh/sshd_config
+fi
+
+# Restart SSH service
+systemctl restart ssh || systemctl restart sshd
+}
+
+#====================================================
+#   Install Requirements
+#====================================================
+install_require() {
+    clear
+    echo "[INFO] Installing dependencies (Debian 11–13 and Ubuntu 22.04–24.04, non-interactive)..."
+
+    # --- OS detection ---
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            debian)
+                VERSION_ID=$(echo "$VERSION_ID" | cut -d. -f1)
+                if [ "$VERSION_ID" -lt 11 ] || [ "$VERSION_ID" -gt 13 ]; then
+                    echo "[ERROR] Unsupported Debian version ($VERSION_ID). Only 11, 12 & 13 are supported."
+                    return 1
+                fi
+                ;;
+            ubuntu)
+                VERSION_ID=$(echo "$VERSION_ID" | cut -d. -f1)
+                if [ "$VERSION_ID" -lt 22 ] || [ "$VERSION_ID" -gt 24 ]; then
+                    echo "[ERROR] Unsupported Ubuntu version ($VERSION_ID). Only 22.04–24.04 are supported."
+                    return 1
+                fi
+                ;;
+            *)
+                echo "[ERROR] This script only supports Debian 11–13 and Ubuntu 22.04–24.04. Detected: $ID"
+                return 1
+                ;;
+        esac
+    else
+        echo "[ERROR] Cannot detect OS version."
+        return 1
+    fi
+
+    # --- Environment ---
+    export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    export DEBIAN_FRONTEND=noninteractive
+
+    # --- Update repos ---
+    apt-get update -qq
+
+    # --- Common packages ---
+    PACKAGES_COMMON=(
+        curl wget gnupg2 apt-transport-https ca-certificates lsb-release
+        cron python3 python3-pip python3-minimal libpython3-stdlib
+        iptables netcat-openbsd httpie php neofetch vnstat php-mysql
+        screen squid stunnel4 dropbear gnutls-bin
+        dos2unix nano unzip jq virt-what net-tools
+        mlocate dh-make libaudit-dev build-essential fail2ban
+    )
+
+    # --- DB client + codename ---
+    if [ "$ID" = "debian" ]; then
+        case "$VERSION_ID" in
+            11) PACKAGES_EXTRA=(mariadb-client); CODENAME="bullseye" ;;
+            12) PACKAGES_EXTRA=(default-mysql-client); CODENAME="bookworm" ;;
+            13) PACKAGES_EXTRA=(default-mysql-client); CODENAME="trixie" ;;
+        esac
+    elif [ "$ID" = "ubuntu" ]; then
+        case "$VERSION_ID" in
+            22) PACKAGES_EXTRA=(default-mysql-client); CODENAME="jammy" ;;
+            23) PACKAGES_EXTRA=(default-mysql-client); CODENAME="mantic" ;;
+            24) PACKAGES_EXTRA=(default-mysql-client); CODENAME="noble" ;;
+        esac
+    fi
+
+    # --- Install packages ---
+    for pkg in "${PACKAGES_COMMON[@]}" "${PACKAGES_EXTRA[@]}"; do
+        echo "[INFO] Installing: $pkg"
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$pkg"; then
+            echo "[WARN] Failed to install: $pkg (skipping)"
+        fi
+    done
+
+    # --- Detect architecture ---
+    ARCH=$(dpkg --print-architecture)
+    case "$ARCH" in
+        amd64|arm64|armhf)
+            echo "[INFO] Detected architecture: $ARCH"
+            ;;
+        *)
+            echo "[WARN] Unsupported arch detected: $ARCH → falling back to amd64"
+            ARCH="amd64"
+            ;;
+    esac
+
+    # --- Add official OpenVPN repo ---
+    echo "[INFO] Adding OpenVPN repo for $ID $VERSION_ID ($CODENAME, $ARCH)..."
+    curl -fsSL https://packages.openvpn.net/packages-repo.gpg | gpg --dearmor -o /usr/share/keyrings/openvpn.gpg
+    echo "deb [arch=$ARCH signed-by=/usr/share/keyrings/openvpn.gpg] https://packages.openvpn.net/openvpn3/$ID $CODENAME main" > /etc/apt/sources.list.d/openvpn.list
+
+    # --- Install OpenVPN (non-interactive) ---
+    apt-get update -qq
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends --allow-downgrades --allow-change-held-packages openvpn; then
+        echo "[ERROR] Failed to install OpenVPN"
+        return 1
+    fi
+
+    {
+        # --- Firewall cleanup ---
+        systemctl stop firewalld 2>/dev/null || true
+        systemctl disable firewalld 2>/dev/null || true
+        systemctl stop nftables 2>/dev/null || true
+        systemctl disable nftables 2>/dev/null || true
+        systemctl stop ufw 2>/dev/null || true
+        systemctl disable ufw 2>/dev/null || true
+
+        # --- Cron setup ---
+        touch /var/spool/cron/crontabs/root
+        chmod 600 /var/spool/cron/crontabs/root
+        systemctl enable --now cron
+
+        # --- Prevent missing bin dirs ---
+        mkdir -p /usr/local/bin /usr/local/var/run /root/.web
+        chmod 777 /root/.web
+
+        # --- Configure OpenSSH ---
+        echo "[INFO] Configuring OpenSSH..."
+        systemctl stop ssh.socket >/dev/null 2>&1 || true
+        systemctl disable ssh.socket >/dev/null 2>&1 || true
+        systemctl enable ssh.service
+
+        sed -i '/^#\?AddressFamily/d' /etc/ssh/sshd_config
+        echo "AddressFamily any" >> /etc/ssh/sshd_config
+        sed -i '/^#\?ListenAddress/d' /etc/ssh/sshd_config
+        echo "ListenAddress 0.0.0.0" >> /etc/ssh/sshd_config
+        echo "ListenAddress ::" >> /etc/ssh/sshd_config
+
+        # Ensure SSH auto-restarts
+        mkdir -p /etc/systemd/system/ssh.service.d
+        cat > /etc/systemd/system/ssh.service.d/override.conf <<EOF
+[Service]
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+EOF
+
+        # --- Configure Dropbear (port 442) ---
+        echo "[INFO] Configuring Dropbear..."
+        cat > /etc/default/dropbear <<EOF
+NO_START=0
+DROPBEAR_PORT=442
+DROPBEAR_EXTRA_ARGS=
+DROPBEAR_BANNER="/etc/banner"
+DROPBEAR_RECEIVE_WINDOW=65536
+EOF
+
+        mkdir -p /etc/systemd/system/dropbear.service.d
+        cat > /etc/systemd/system/dropbear.service.d/override.conf <<EOF
+[Service]
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+EOF
+
+        # --- Download banner ---
+        wget -q -O /etc/banner "https://raw.githubusercontent.com/EskalarteDexter/Autoscript/main/SshBanner"
+        chmod 644 /etc/banner
+
+        # --- Reload systemd + restart services ---
+        systemctl daemon-reexec
+        systemctl daemon-reload
+        systemctl enable ssh dropbear
+        systemctl restart ssh dropbear
+    } &>/dev/null
+
+    echo "[INFO] Dependencies + latest OpenVPN (via official repo), OpenSSH (22), and Dropbear (442) setup completed."
+}
+
+#====================================================
+#   Install Hysteria UDP
+#====================================================
+install_hysteria(){
+clear
+echo 'Installing hysteria.'
+{
+
+# Download & install Hysteria v1.3.5
+wget -N --no-check-certificate -q -O ~/install_server.sh https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/install_server.sh; chmod +x ~/install_server.sh; ./install_server.sh --version v1.3.5
+
+# Clean old config
+rm -f /etc/hysteria/config.json
+
+# Create new config with placeholders
+wget -O /etc/hysteria/config.json "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/config.json"
+
+# Replace placeholders
+sed -i "s|mediatekvpn|$OBFS|g" /etc/hysteria/config.json
+
+cat <<"EOM" >/etc/hysteria/.auth.sh
+#!/bin/bash
+. /etc/openvpn/login/config.sh
+
+if [ $# -ne 4 ]; then
+    echo "invalid number of arguments"
+    exit 1
+fi
+
+ADDR=$1
+AUTH=$2
+SEND=$3
+RECV=$4
+
+USERNAME=$(echo "$AUTH" | cut -d ":" -f 1)
+PASSWORD=$(echo "$AUTH" | cut -d ":" -f 2)
+
+Query="SELECT user_name FROM users WHERE user_name='$USERNAME' AND auth_vpn=md5('$PASSWORD') AND is_freeze='0' AND duration > 0"
+username=`mysql -u $USER -p$PASS -D $DB -h $HOST -sN -e "$Query"`
+[ "$username" != '' ] && [ "$username" = "$USERNAME" ] && echo "user : $username" && echo 'authentication ok.' && exit 0 || echo 'Authentication failed.'; exit 1
+EOM
+
+chmod 755 /etc/hysteria/config.json
+chmod 755 /etc/hysteria/.auth.sh
+
+sysctl -w net.core.rmem_max=16777216
+sysctl -w net.core.wmem_max=16777216
+
+wget -O /usr/bin/badvpn-udpgw "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/badvpn-udpgw64"
+chmod +x /usr/bin/badvpn-udpgw
+} &>/dev/null
+}
+
+#====================================================
+#   Install BBR
+#====================================================
+installBBR() {
+echo "Installing & enabling BBR..."
+
+# Ensure BBR is set without duplication
+sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+
+# Apply immediately
+sysctl -p
+
+# Load module on boot
+if ! grep -q "tcp_bbr" /etc/modules-load.d/modules.conf 2>/dev/null; then
+echo "tcp_bbr" >> /etc/modules-load.d/modules.conf
+fi
+modprobe tcp_bbr
+
+# Verify
+sysctl net.ipv4.tcp_congestion_control
+lsmod | grep bbr && echo "✅ BBR is active" || echo "⚠️ BBR failed to load"
+INSTALL_BBR=true
+}
+
+#====================================================
+#   Advanced TCP Optimizations (High Speed)
+#====================================================
+optimize_tcp() {
+    echo "Applying advanced TCP optimizations for maximum speed..."
+    
+    # Remove old entries to avoid duplicates
+    sed -i '/net.ipv4.tcp_fastopen/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_slow_start_after_idle/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_tw_reuse/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_fin_timeout/d' /etc/sysctl.conf
+    sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
+    sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_rmem/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_wmem/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
+    sed -i '/net.core.netdev_max_backlog/d' /etc/sysctl.conf
+    sed -i '/net.core.somaxconn/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_max_syn_backlog/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_max_tw_buckets/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_keepalive/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_syncookies/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_rfc1337/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_sack/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_window_scaling/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.conf
+    sed -i '/net.core.optmem_max/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.udp_rmem_min/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.udp_wmem_min/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_notsent_lowat/d' /etc/sysctl.conf
+    
+    # Apply comprehensive TCP/UDP optimizations for HIGH SPEED
+    cat >> /etc/sysctl.conf << 'TCPEOF'
+
+# ===== VOLLAM HIGH SPEED TCP/UDP OPTIMIZATIONS =====
+# TCP Fast Open for faster connection establishment
+net.ipv4.tcp_fastopen=3
+
+# Disable slow start after idle for persistent connections
+net.ipv4.tcp_slow_start_after_idle=0
+
+# Enable TIME-WAIT socket reuse
+net.ipv4.tcp_tw_reuse=1
+
+# Reduce FIN timeout for faster connection cleanup
+net.ipv4.tcp_fin_timeout=10
+
+# Maximum socket receive/send buffer sizes (64MB)
+net.core.rmem_max=67108864
+net.core.wmem_max=67108864
+
+# TCP receive/send buffer auto-tuning (min, default, max)
+net.ipv4.tcp_rmem=4096 1048576 67108864
+net.ipv4.tcp_wmem=4096 1048576 67108864
+
+# Enable MTU probing for optimal packet size
+net.ipv4.tcp_mtu_probing=1
+
+# Increase network device backlog for high traffic
+net.core.netdev_max_backlog=65536
+
+# Maximum pending connections
+net.core.somaxconn=65535
+
+# Maximum SYN backlog
+net.ipv4.tcp_max_syn_backlog=65535
+
+# Increase TIME-WAIT buckets
+net.ipv4.tcp_max_tw_buckets=2000000
+
+# TCP keepalive optimizations (faster detection)
+net.ipv4.tcp_keepalive_time=60
+net.ipv4.tcp_keepalive_intvl=10
+net.ipv4.tcp_keepalive_probes=6
+
+# Enable SYN cookies for DDoS protection
+net.ipv4.tcp_syncookies=1
+
+# RFC 1337 compliance
+net.ipv4.tcp_rfc1337=1
+
+# Enable TCP SACK for better loss recovery
+net.ipv4.tcp_sack=1
+
+# Enable window scaling for high bandwidth
+net.ipv4.tcp_window_scaling=1
+
+# Enable timestamps for RTT calculation
+net.ipv4.tcp_timestamps=1
+
+# Enable ECN for congestion notification
+net.ipv4.tcp_ecn=1
+
+# Increase option memory
+net.core.optmem_max=65536
+
+# UDP buffer sizes
+net.ipv4.udp_rmem_min=16384
+net.ipv4.udp_wmem_min=16384
+
+# Low latency TCP
+net.ipv4.tcp_notsent_lowat=16384
+
+# ===== QUIC/UDP OPTIMIZATIONS =====
+# Increase UDP memory limits
+net.ipv4.udp_mem=65536 131072 262144
+
+# ===== MEMORY OPTIMIZATIONS =====
+# Virtual memory tuning
+vm.swappiness=10
+vm.dirty_ratio=60
+vm.dirty_background_ratio=5
+
+# ===== SECURITY + PERFORMANCE =====
+# Disable IPv6 if not needed (reduces overhead)
+net.ipv6.conf.all.disable_ipv6=1
+net.ipv6.conf.default.disable_ipv6=1
+
+# Enable IP forwarding
+net.ipv4.ip_forward=1
+
+# Disable source routing
+net.ipv4.conf.all.accept_source_route=0
+net.ipv4.conf.default.accept_source_route=0
+
+# Enable reverse path filtering
+net.ipv4.conf.all.rp_filter=1
+net.ipv4.conf.default.rp_filter=1
+TCPEOF
+
+    sysctl -p
+    echo "High-speed TCP/UDP optimizations applied successfully!"
+}
+
+#====================================================
+#   Install BBR
+#====================================================
+install_squid(){
+clear
+echo 'Installing proxy.'
+{
+# Download and install custom squid init script
+wget -q --no-check-certificate -O /etc/init.d/squid https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/squid.sh
+chmod +x /etc/init.d/squid
+update-rc.d squid defaults
+
+# Ensure squid log directory is owned by proxy user
+chown -R proxy:proxy /var/log/squid
+
+# Initialize cache directories
+squid -z
+
+# Go to squid config directory
+cd /etc/squid/ || exit 1
+
+# Backup and replace squid.conf
+[ -f squid.conf ] && mv squid.conf squid.conf.bak
+
+# Get server public IP
+SERVER_IP=$(curl -s https://api.ipify.org)
+
+# Create new squid.conf
+cat <<EOF > squid.conf
+acl Firenet dst $SERVER_IP
+http_port 8080
+http_port 8181
+visible_hostname Dexter-Proxy
+acl PURGE method PURGE
+acl HEAD method HEAD
+acl POST method POST
+acl GET method GET
+acl CONNECT method CONNECT
+http_access allow Firenet
+http_reply_access allow all
+http_access deny all
+icp_access allow all
+always_direct allow all
+error_directory /usr/share/squid/errors/English
+EOF
+
+# Customize ERR_INVALID_URL page
+cd /usr/share/squid/errors/English || exit 1
+[ -f ERR_INVALID_URL ] && mv ERR_INVALID_URL ERR_INVALID_URL.bak
+wget -O ERR_INVALID_URL "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/ERR_INVALID_URL"
+
+# Set proper permissions
+chmod 644 ERR_INVALID_URL
+
+# Restart squid
+/etc/init.d/squid restart
+cd /etc || exit 1
+
+# Download socks.py
+wget -q 'https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/socks.py' -O /etc/socks.py
+dos2unix /etc/socks.py
+chmod +x /etc/socks.py
+
+# Download socks.service
+wget -O /etc/systemd/system/socks.service "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/socks.service"
+systemctl daemon-reload
+systemctl enable socks
+systemctl restart socks
+
+# Replace UDP port with TCP port in socks.py
+if [[ -n "${PORT_UDP}" && -n "${PORT_TCP}" ]]; then
+sed -i "s/${PORT_UDP}/${PORT_TCP}/g" /etc/socks.py
+fi
+
+# Download and set up Python scripts (configs in /etc)
+for file in socks-ssh.py socks-ws-ssh.py socks-ws-ssl.py; do
+wget -q "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/$file" -O "/etc/$file"
+dos2unix "/etc/$file"
+chmod 644 "/etc/$file"
+done
+
+# Download and set up binaries
+declare -A files=(
+["monitorz"]=".monitor"
+["ws"]=".ws"
+["hysteria"]=".hysteria"
+)
+
+for src in "${!files[@]}"; do
+dst="${files[$src]}"
+wget -q "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/$src" -O "/etc/$dst"
+chmod +x "/etc/$dst"
+done
+
+rm /etc/apt/sources.list
+sudo cp /etc/apt/sources.list_backup /etc/apt/sources.list
+} &>/dev/null
+}
+
+#====================================================
+#   Install OpenVPN
+#====================================================
+install_openvpn()
+{
+clear
+echo "Installing openvpn."
+{
+# Ensure directories
+mkdir -p /etc/openvpn/easy-rsa/keys
+mkdir -p /etc/openvpn/login
+mkdir -p /etc/openvpn/server
+mkdir -p /var/www/html/stat
+
+touch /etc/openvpn/server.conf
+touch /etc/openvpn/server2.conf
+
+# Set DNS resolver
+cat >> /etc/systemd/resolved.conf <<EOF
+DNS=1.1.1.1
+DNSStubListener=no
+EOF
+
+# OpenVPN UDP server configuration
+wget -O /etc/openvpn/server.conf "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/server.conf"
+
+# Replace placeholder with actual UDP port
+sed -i "s|PORT_UDP|$PORT_UDP|g" /etc/openvpn/server.conf
+
+# OpenVPN TCP server configuration
+wget -O /etc/openvpn/server2.conf "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/server2.conf"
+
+# Replace placeholder with real port
+sed -i "s|PORT_TCP|$PORT_TCP|g" /etc/openvpn/server2.conf
+
+# Check if database credentials are available from panel
+if [ -f /etc/xray/.db-base ]; then
+    # Read credentials from panel-provided file
+    source /etc/xray/.db-base
+    echo "Using database credentials from panel..."
+fi
+
+# Create config.sh with database credentials
+cat <<\EOM >/etc/openvpn/login/config.sh
+#!/bin/bash
+HOST='DBHOST'
+USER='DBUSER'
+PASS='DBPASS'
+DB='DBNAME'
+EOM
+
+# Replace placeholders with actual values if available
+if [ -n "$HOST" ] && [ -n "$USER" ] && [ -n "$PASS" ] && [ -n "$DBNAME" ]; then
+    sed -i "s|DBHOST|$HOST|g" /etc/openvpn/login/config.sh
+    sed -i "s|DBUSER|$USER|g" /etc/openvpn/login/config.sh
+    sed -i "s|DBPASS|$PASS|g" /etc/openvpn/login/config.sh
+    sed -i "s|DBNAME|$DBNAME|g" /etc/openvpn/login/config.sh
+    echo "Database credentials configured for online status tracking"
+else
+    echo "WARNING: Database credentials not available"
+    echo "Online status tracking will not work until credentials are configured"
+    echo "Run fix_online_status.sh after adding server to panel"
+fi
+
+chmod 600 /etc/openvpn/login/config.sh
+
+#====================================================
+#	Finalizing Server Authentication
+#	Finalized: MtkDex Developer
+#====================================================
+
+#TCP authentication
+wget -O /etc/openvpn/login/auth_vpn "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/auth_vpn"
+
+#client-connect file
+wget -O /etc/openvpn/login/connect.sh "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/connect.sh"
+
+sed -i "s|SERVER_IP|$server_ip|g" /etc/openvpn/login/connect.sh
+
+#TCP client-disconnect file
+wget -O /etc/openvpn/login/disconnect.sh "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/disconnect.sh"
+
+sed -i "s|SERVER_IP|$server_ip|g" /etc/openvpn/login/disconnect.sh
+
+#====================================================
+#	Finalizing Server Certificate
+#	Finalized: MtkDex Developer
+#====================================================
+
+#Configured ca.rt
+wget -O /etc/openvpn/easy-rsa/keys/ca.crt "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/ca.crt"
+
+#Configured server.crt
+wget -O /etc/openvpn/easy-rsa/keys/server.crt "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/server.crt"
+
+#Configured server.key
+wget -O /etc/openvpn/easy-rsa/keys/server.key "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/server.key"
+
+#Configured dh.pem
+wget -O /etc/openvpn/easy-rsa/keys/dh.pem "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/dh.pem"
+
+dos2unix /etc/openvpn/login/auth_vpn
+dos2unix /etc/openvpn/login/connect.sh
+dos2unix /etc/openvpn/login/disconnect.sh
+
+chmod 777 -R /etc/openvpn/
+chmod 755 /etc/openvpn/server.conf
+chmod 755 /etc/openvpn/server2.conf
+chmod 755 /etc/openvpn/login/connect.sh
+chmod 755 /etc/openvpn/login/disconnect.sh
+chmod 755 /etc/openvpn/login/config.sh
+chmod 755 /etc/openvpn/login/auth_vpn
+}&>/dev/null
+}
+
+#====================================================
+#   Install SlowDNS
+#====================================================
+install_slowdns (){
+echo "Installing dns..."
+{
+dnsresolverName="Cloudflare (1.1.1.1)"
+dnsresolverType="udp"
+dnsresolver="1.1.1.1:53"
+
+# Config Ssh
+sed -i 's/#AllowTcpForwarding yes/AllowTcpForwarding yes/g' /etc/ssh/sshd_config
+
+# SET DNSTT
+export DNSDIR=/etc/.dnsquest
+export DNSCONFIG=/root/.dns
+mkdir -m 777 $DNSDIR
+mkdir -m 777 $DNSCONFIG
+
+# BUILD DNSTT SERVER
+cd $DNSDIR/dnstt/dnstt-server
+wget -O dnstt-server "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/slowdns/xxxxx/dnstt-server"
+chmod +x dnstt-server
+wget -O dnstt-client "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/slowdns/xxxxx/dnstt-client"
+chmod +x dnstt-client
+
+./dnstt-server -gen-key -privkey-file server.key -pubkey-file server.pub
+cp server.key server.pub $DNSCONFIG
+cp dnstt-server $DNSDIR
+
+# BUILD DNSTT CLIENT
+cd $DNSDIR/dnstt/dnstt-client
+cp dnstt-client $DNSDIR
+
+#Source
+echo "
+hostname=$DOMAIN
+domain=$NS
+privkey=`cat /root/.dns/server.key`
+pubkey=`cat /root/.dns/server.pub`
+os=debian
+dnsresolvertype=$dnsresolverType
+dnsresolver=$dnsresolver" >> $DNSCONFIG/config
+secretkey='server'
+
+#API Details
+wget -O /etc/authentication.sh "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication.sh"
+
+# Cron job for authentication check
+cat > /etc/cron.d/account <<EOF
+* * * * * root bash /etc/authentication.sh
+EOF
+chmod 644 /etc/cron.d/account
+
+# Save server info
+cat > /root/.web/$secretkey.txt <<EOF
+Hi! this is your server information, Happy Surfing!
+
+IP : $server_ip
+Hostname: $DOMAIN
+
+-----------------------
+SSH DETAILS
+-----------------------
+SSH : 22
+SSH SSL : 445
+DROPBEAR : 442
+DROPBEAR SSL : 446
+
+-----------------------
+HYSTERIA DETAILS
+-----------------------
+HYSTERIA UDP : 5666, 20000 - 50000
+OBFS: $OBFS
+AUTH_STR: username:password
+
+-----------------------
+PROXY DETAILS
+-----------------------
+SQUID : 8080
+HTTP/SOCKS : 80, 8000, 8001, 8002
+
+-----------------------
+SLOWDNS DETAILS
+-----------------------
+DNS URL : $NS
+SSH via DNS : 442
+DNS RESOLVER : $dnsresolverName
+DNS PUBLIC KEY : $(cat /root/.dns/server.pub)
+
+-----------------------
+
+Website www.vollam.com
+WhatsApp https://wa.link/1cwolb
+EOF
+
+#install client-sldns.service
+cat > /etc/systemd/system/client-sldns.service << END
+[Unit]
+Description=Client SlowDNS By HideSSH
+Documentation=https://hidessh.com
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/etc/.dnsquest/dnstt-client -udp 1.1.1.1:53 --pubkey-file /root/.dns/server.pub $NS 127.0.0.1:2222
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+END
+
+#install server-sldns.service
+cat > /etc/systemd/system/server-sldns.service << END
+[Unit]
+Description=Server SlowDNS By HideSSH
+Documentation=https://hidessh.com
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/etc/.dnsquest/dnstt-server -udp :5300 -privkey-file /root/.dns/server.key $NS 127.0.0.1:442
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+END
+
+#permission service slowdns
+chmod +x /etc/systemd/system/client-sldns.service
+chmod +x /etc/systemd/system/server-sldns.service
+
+systemctl daemon-reload
+systemctl enable client-sldns
+systemctl enable server-sldns
+systemctl start client-sldns
+systemctl start server-sldns
+
+} &>/dev/null
+}
+
+#====================================================
+#   Install Firewall & Iptables
+#====================================================
+install_firewall_kvm() {
+clear
+# --- Enable IP forwarding & disable rp_filter (no duplicates) ---
+grep -qxF "net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+grep -qxF "net.ipv4.conf.all.rp_filter=0" /etc/sysctl.conf || echo "net.ipv4.conf.all.rp_filter=0" >> /etc/sysctl.conf
+grep -qxF "net.ipv4.conf.${server_interface}.rp_filter=0" /etc/sysctl.conf || echo "net.ipv4.conf.${server_interface}.rp_filter=0" >> /etc/sysctl.conf
+sysctl -p
+
+# --- NAT rules for UDP traffic ---
+ iptables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 10000:50000 -j DNAT --to-destination :5666 2>/dev/null || iptables -t nat -A PREROUTING -i "$server_interface" -p udp --dport 10000:50000 -j DNAT --to-destination :5666
+
+# OpenVPN NAT/MASQUERADE for internet access
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE
+iptables -t nat -C POSTROUTING -s 10.9.0.0/24 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o "$server_interface" -j MASQUERADE
+
+# Hysteria NAT rules
+iptables -t nat -C POSTROUTING -s 10.20.0.0/22 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.20.0.0/22 -o "$server_interface" -j MASQUERADE
+iptables -t nat -C POSTROUTING -s 10.30.0.0/22 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.30.0.0/22 -o "$server_interface" -j MASQUERADE
+
+# CRITICAL: Enable MASQUERADE for ALL VPN traffic to internet
+iptables -t nat -C POSTROUTING -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o "$server_interface" -j MASQUERADE
+
+# Allow forwarding for VPN clients
+iptables -C FORWARD -i tun+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun+ -j ACCEPT
+iptables -C FORWARD -o tun+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -o tun+ -j ACCEPT
+iptables -C FORWARD -i "$server_interface" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$server_interface" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -C FORWARD -i tun+ -o "$server_interface" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun+ -o "$server_interface" -j ACCEPT
+
+# --- UDP flood protection ---
+iptables -C INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --update --seconds 30 --hitcount 10 --name DEFAULT --mask 255.255.255.255 --rsource -j DROP 2>/dev/null || iptables -A INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --update --seconds 30 --hitcount 10 --name DEFAULT --mask 255.255.255.255 --rsource -j DROP
+iptables -C INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --set --name DEFAULT --mask 255.255.255.255 --rsource 2>/dev/null || iptables -A INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --set --name DEFAULT --mask 255.255.255.255 --rsource
+
+# --- Ensure SSH port 22 is open ---
+iptables -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 22 -j ACCEPT
+
+# --- DNS redirection ---
+iptables -C INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 5300 -j ACCEPT
+iptables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || iptables -t nat -I PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300
+
+if command -v ip6tables >/dev/null 2>&1; then
+ip6tables -C INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport 5300 -j ACCEPT
+ip6tables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || ip6tables -t nat -I PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300
+fi
+
+# --- Persist iptables rules ---
+
+export DEBIAN_FRONTEND=noninteractive
+
+# ========================
+# SYSTEM UPDATE & DEPENDENCIES
+# ========================
+apt update -y && apt upgrade -y
+apt install -y curl socat iptables-persistent netfilter-persistent
+
+# ========================
+# PERSIST IPTABLES
+# ========================
+netfilter-persistent save
+netfilter-persistent reload
+
+# ========================
+# INCREASE FILE DESCRIPTOR LIMITS
+# ========================
+sed -i '/^\*\s\+soft\s\+nofile/d' /etc/security/limits.conf
+sed -i '/^\*\s\+hard\s\+nofile/d' /etc/security/limits.conf
+echo '* soft nofile 65536' >> /etc/security/limits.conf
+echo '* hard nofile 65536' >> /etc/security/limits.conf
+
+sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/system.conf
+echo 'DefaultLimitNOFILE=65536' >> /etc/systemd/system.conf
+sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/user.conf
+echo 'DefaultLimitNOFILE=65536' >> /etc/systemd/user.conf
+systemctl daemon-reexec
+echo "[INFO] Firewall setup completed"
+}
+
+#====================================================
+#   Install Stunnel & Dropbear
+#====================================================
+install_stunnel() {
+  {
+cd /etc/stunnel/ || exit
+
+cat <<'EOF' > stunnel.pem
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQClmgCdm7RB2VWK
+wfH8HO/T9bxEddWDsB3fJKpM/tiVMt4s/WMdGJtFdRlxzUb03u+HT6t00sLlZ78g
+ngjxLpJGFpHAGdVf9vACBtrxv5qcrG5gd8k7MJ+FtMTcjeQm8kVRyIW7cOWxlpGY
+6jringYZ6NcRTrh/OlxIHKdsLI9ddcekbYGyZVTm1wd22HVG+07PH/AeyY78O2+Z
+tbjxGTFRSYt3jUaFeUmWNtxqWnR4MPmC+6iKvUKisV27P89g8v8CiZynAAWRJ0+A
+qp+PWxwHi/iJ501WdLspeo8VkXIb3PivyIKC356m+yuuibD2uqwLZ2//afup84Qu
+pRtgW/PbAgMBAAECggEAVo/efIQUQEtrlIF2jRNPJZuQ0rRJbHGV27tdrauU6MBT
+NG8q7N2c5DymlT75NSyHRlKVzBYTPDjzxgf1oqR2X16Sxzh5uZTpthWBQtal6fmU
+JKbYsDDlYc2xDZy5wsXnCC3qAaWs2xxadPUS3Lw/cjGsoeZlOFP4QtV/imLseaws
+7r4KZE7SVO8dF8Xtcy304Bd7UsKClnbCrGsABUF/rqA8g34o7yrpo9XqcwbF5ihQ
+TbnB0Ns8Bz30pjgGjJZTdTL3eskP9qMJWo/JM76kSaJWReoXTws4DlQHxO29z3eK
+zKdxieXaBGMwFnv23JvXKJ5eAnxzqsL6a+SuNPPN4QKBgQDQhisSDdjUJWy0DLnJ
+/HjtsnQyfl0efOqAlUEir8r5IdzDTtAEcW6GwPj1rIOm79ZeyysT1pGN6eulzS1i
+6lz6/c5uHA9Z+7LT48ZaQjmKF06ItdfHI9ytoXaaQPMqW7NnyOFxCcTHBabmwQ+E
+QZDFkM6vVXL37Sz4JyxuIwCNMQKBgQDLThgKi+L3ps7y1dWayj+Z0tutK2JGDww7
+6Ze6lD5gmRAURd0crIF8IEQMpvKlxQwkhqR4vEsdkiFFJQAaD+qZ9XQOkWSGXvKP
+A/yzk0Xu3qL29ZqX+3CYVjkDbtVOLQC9TBG60IFZW79K/Zp6PhHkO8w6l+CBR+yR
+X4+8x1ReywKBgQCfSg52wSski94pABugh4OdGBgZRlw94PCF/v390En92/c3Hupa
+qofi2mCT0w/Sox2f1hV3Fw6jWNDRHBYSnLMgbGeXx0mW1GX75OBtrG8l5L3yQu6t
+SeDWpiPim8DlV52Jp3NHlU3DNrcTSOFgh3Fe6kpot56Wc5BJlCsliwlt0QKBgEol
+u0LtbePgpI2QS41ewf96FcB8mCTxDAc11K6prm5QpLqgGFqC197LbcYnhUvMJ/eS
+W53lHog0aYnsSrM2pttr194QTNds/Y4HaDyeM91AubLUNIPFonUMzVJhM86FP0XK
+3pSBwwsyGPxirdpzlNbmsD+WcLz13GPQtH2nPTAtAoGAVloDEEjfj5gnZzEWTK5k
+4oYWGlwySfcfbt8EnkY+B77UVeZxWnxpVC9PhsPNI1MTNET+CRqxNZzxWo3jVuz1
+HtKSizJpaYQ6iarP4EvUdFxHBzjHX6WLahTgUq90YNaxQbXz51ARpid8sFbz1f37
+jgjgxgxbitApzno0E2Pq/Kg=
+-----END PRIVATE KEY-----
+-----BEGIN CERTIFICATE-----
+MIIDRTCCAi2gAwIBAgIUOvs3vdjcBtCLww52CggSlAKafDkwDQYJKoZIhvcNAQEL
+BQAwMjEQMA4GA1UEAwwHS29ielZQTjERMA8GA1UECgwIS29iZUtvYnoxCzAJBgNV
+BAYTAlBIMB4XDTIxMDcwNzA1MzQwN1oXDTMxMDcwNTA1MzQwN1owMjEQMA4GA1UE
+AwwHS29ielZQTjERMA8GA1UECgwIS29iZUtvYnoxCzAJBgNVBAYTAlBIMIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApZoAnZu0QdlVisHx/Bzv0/W8RHXV
+g7Ad3ySqTP7YlTLeLP1jHRibRXUZcc1G9N7vh0+rdNLC5We/IJ4I8S6SRhaRwBnV
+X/bwAgba8b+anKxuYHfJOzCfhbTE3I3kJvJFUciFu3DlsZaRmOo64p4GGejXEU64
+fzpcSBynbCyPXXXHpG2BsmVU5tcHdth1RvtOzx/wHsmO/DtvmbW48RkxUUmLd41G
+hXlJljbcalp0eDD5gvuoir1CorFduz/PYPL/AomcpwAFkSdPgKqfj1scB4v4iedN
+VnS7KXqPFZFyG9z4r8iCgt+epvsrromw9rqsC2dv/2n7qfOELqUbYFvz2wIDAQAB
+o1MwUTAdBgNVHQ4EFgQUcKFL6tckon2uS3xGrpe1Zpa68VEwHwYDVR0jBBgwFoAU
+cKFL6tckon2uS3xGrpe1Zpa68VEwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0B
+AQsFAAOCAQEAYQP0S67eoJWpAMavayS7NjK+6KMJtlmL8eot/3RKPLleOjEuCdLY
+QvrP0Tl3M5gGt+I6WO7r+HKT2PuCN8BshIob8OGAEkuQ/YKEg9QyvmSm2XbPVBaG
+RRFjvxFyeL4gtDlqb9hea62tep7+gCkeiccyp8+lmnS32rRtFa7PovmK5pUjkDOr
+dpvCQlKoCRjZ/+OfUaanzYQSDrxdTSN8RtJhCZtd45QbxEXzHTEaICXLuXL6cmv7
+tMuhgUoefS17gv1jqj/C9+6ogMVa+U7QqOvL5A7hbevHdF/k/TMn+qx4UdhrbL5Q
+enL3UGT+BhRAPiA1I5CcG29RqjCzQoaCNg==
+-----END CERTIFICATE-----
+EOF
+
+cat <<EOF > /etc/stunnel/stunnel.conf
+debug = 0
+output = /tmp/stunnel.log
+cert = /etc/stunnel/stunnel.pem
+
+[openvpn-tcp]
+connect = PORT_TCP
+accept = PORT_SSL
+
+[openvpn-udp]
+connect = PORT_UDP
+accept = 444
+
+[ssh]
+connect = 22
+accept = 445
+
+[dropbear]
+connect = 442
+accept = 446
+EOF
+
+sed -i "s|PORT_TCP|$PORT_TCP|g" /etc/stunnel/stunnel.conf
+sed -i "s|PORT_UDP|$PORT_UDP|g" /etc/stunnel/stunnel.conf
+sed -i "s|PORT_SSL|$PORT_SSL|g" /etc/stunnel/stunnel.conf
+
+# Configure stunnel4
+cat <<EOF > /etc/default/stunnel4
+ENABLED=1
+FILES="/etc/stunnel/*.conf"
+OPTIONS=""
+PPP_RESTART=0
+RLIMITS=""
+EOF
+
+chmod 644 /etc/default/stunnel4
+echo "/bin/false" >> /etc/shells
+useradd -p $(openssl passwd -1 debian) debian -ou 0 -g 0
+sudo service stunnel4 restart
+  } &>/dev/null
+}
+
+#====================================================
+#   Install Hysteria 2 (Ultra Fast QUIC Protocol)
+#====================================================
+install_hysteria2() {
+    echo "Installing Hysteria 2..."
+    {
+    # Download and install Hysteria 2
+    bash <(curl -fsSL https://get.hy2.sh/)
+    
+    # Create config directory
+    mkdir -p /etc/hysteria
+    
+    # Generate self-signed certificate (reuse if exists from Hysteria 1)
+    if [ ! -f /etc/hysteria/server.crt ]; then
+        openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
+            -keyout /etc/hysteria/server.key \
+            -out /etc/hysteria/server.crt \
+            -subj "/CN=bing.com" \
+            -days 36500
+        chmod 600 /etc/hysteria/server.key
+        chmod 644 /etc/hysteria/server.crt
+    fi
+    
+    # Create Hysteria 2 config with authentication
+    cat > /etc/hysteria/config2.yaml << EOF
+listen: :36712
+
+tls:
+  cert: /etc/hysteria/server.crt
+  key: /etc/hysteria/server.key
+
+auth:
+  type: password
+  password: ${AUTHSTR}
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.bing.com
+    rewriteHost: true
+
+quic:
+  initStreamReceiveWindow: 16777216
+  maxStreamReceiveWindow: 16777216
+  initConnReceiveWindow: 33554432
+  maxConnReceiveWindow: 33554432
+  maxIdleTimeout: 30s
+  maxIncomingStreams: 1024
+
+bandwidth:
+  up: 1 gbps
+  down: 1 gbps
+
+ignoreClientBandwidth: false
+speedTest: true
+disableUDP: false
+udpIdleTimeout: 60s
+EOF
+
+    # Create systemd service
+    cat > /etc/systemd/system/hysteria2.service << EOF
+[Unit]
+Description=Hysteria 2 Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config2.yaml
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable and start
+    systemctl daemon-reload
+    systemctl enable hysteria2
+    systemctl start hysteria2
+    
+    echo "hysteria2_port=36712" >> /root/.ports
+    echo "hysteria2_password=${AUTHSTR}" >> /root/.ports
+    } &>/dev/null
+}
+
+#====================================================
+#   Install TUIC (Modern QUIC Protocol)
+#====================================================
+install_tuic() {
+    echo "Installing TUIC..."
+    {
+    # Get latest version
+    TUIC_VERSION=$(curl -s https://api.github.com/repos/EAimTY/tuic/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    # Download TUIC server
+    wget -O /usr/local/bin/tuic-server \
+        "https://github.com/EAimTY/tuic/releases/download/${TUIC_VERSION}/tuic-server-${TUIC_VERSION}-x86_64-unknown-linux-gnu"
+    
+    chmod +x /usr/local/bin/tuic-server
+    
+    # Generate UUID for TUIC
+    TUIC_UUID=$(cat /proc/sys/kernel/random/uuid)
+    
+    # Create config directory
+    mkdir -p /etc/tuic
+    
+    # Create TUIC config
+    cat > /etc/tuic/config.json << EOF
+{
+    "server": "[::]:8443",
+    "users": {
+        "${TUIC_UUID}": "${AUTHSTR}"
+    },
+    "certificate": "/etc/hysteria/server.crt",
+    "private_key": "/etc/hysteria/server.key",
+    "congestion_control": "bbr",
+    "alpn": ["h3"],
+    "udp_relay_ipv6": true,
+    "zero_rtt_handshake": true,
+    "dual_stack": true,
+    "auth_timeout": "3s",
+    "task_negotiation_timeout": "3s",
+    "max_idle_time": "15s",
+    "max_external_packet_size": 1500,
+    "gc_interval": "3s",
+    "gc_lifetime": "15s",
+    "log_level": "warn"
+}
+EOF
+
+    # Create systemd service
+    cat > /etc/systemd/system/tuic.service << EOF
+[Unit]
+Description=TUIC Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/tuic-server -c /etc/tuic/config.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable and start
+    systemctl daemon-reload
+    systemctl enable tuic
+    systemctl start tuic
+    
+    echo "tuic_uuid=${TUIC_UUID}" >> /root/.ports
+    echo "tuic_password=${AUTHSTR}" >> /root/.ports
+    echo "tuic_port=8443" >> /root/.ports
+    } &>/dev/null
+}
+
+#====================================================
+#   Install Xray vless/vmess (Anti-Censorship)
+#====================================================
+install_tls_cert() {
+    # Generate a random Gmail email automatically
+    RANDOM_EMAIL="xray-$(openssl rand -hex 5)@gmail.com"
+    echo "Using auto-generated email: ${RANDOM_EMAIL}"
+
+apt update && apt upgrade -y
+apt install curl socat -y
+curl https://get.acme.sh | sh                               
+~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+~/.acme.sh/acme.sh --register-account -m "${AUTO_EMAIL}"
+~/.acme.sh/acme.sh --issue -d "${DOMAIN}" --standalone
+~/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" --key-file /etc/ssl/xray/private.key --fullchain-file /etc/ssl/xray/fullchain.pem
+
+    echo "Certificate installed successfully for ${DOMAIN} using ${RANDOM_EMAIL}"
+}
+
+
+install_xray_tls_ws_all() {
+  # Install Xray if missing
+    if [ ! -f /usr/local/bin/xray ]; then
+        bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)
+    fi
+
+    # Generate credentials
+    VLESS_UUID=$(cat /proc/sys/kernel/random/uuid)
+    VMESS_UUID=$(cat /proc/sys/kernel/random/uuid)
+    TROJAN_PASS=$(openssl rand -hex 16)
+    SS_PASS=$(openssl rand -hex 16)
+    SS_METHOD="aes-128-gcm"
+
+    VLESS_PATH="/vless"
+    VMESS_PATH="/vmess"
+    TROJAN_PATH="/trojan"
+    SS_PATH="/ss"
+
+    CERT_PATH="/etc/ssl/xray/fullchain.pem"
+    KEY_PATH="/etc/ssl/xray/private.key"
+
+    mkdir -p /etc/xray/tlsws
+
+    # Create Xray config
+    cat > /etc/xray/tlsws/config.json << EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": ${XRAY_PORT},
+      "protocol": "vless",
+      "settings": {
+        "clients": [ { "id": "${VLESS_UUID}" } ],
+        "decryption": "none",
+        "fallbacks": [
+          { "path": "${VMESS_PATH}", "dest": 10001, "xver": 1 },
+          { "path": "${TROJAN_PATH}", "dest": 10002, "xver": 1 },
+          { "path": "${SS_PATH}", "dest": 10003, "xver": 1 }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [ { "certificateFile": "${CERT_PATH}", "keyFile": "${KEY_PATH}" } ]
+        },
+        "wsSettings": { "path": "${VLESS_PATH}" }
+      }
+    },
+    { "listen": "127.0.0.1", "port": 10001, "protocol": "vmess", "settings": { "clients": [ { "id": "${VMESS_UUID}", "alterId": 0 } ] } },
+    { "listen": "127.0.0.1", "port": 10002, "protocol": "trojan", "settings": { "clients": [ { "password": "${TROJAN_PASS}" } ] } },
+    { "listen": "127.0.0.1", "port": 10003, "protocol": "shadowsocks", "settings": { "method": "${SS_METHOD}", "password": "${SS_PASS}", "network": "tcp,udp" } }
+  ],
+  "outbounds": [ { "protocol": "freedom" } ]
+}
+EOF
+
+    # Create systemd service
+    cat > /etc/systemd/system/xray-tlsws.service << EOF
+[Unit]
+Description=Xray ALL TLS WebSocket (8444)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/xray run -c /etc/xray/tlsws/config.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable xray-tlsws
+    systemctl restart xray-tlsws
+
+    # Generate VMess Base64
+    VMESS_JSON=$(cat << EOF
+{
+  "v":"2",
+  "ps":"VMESS_TLS_WS_8444",
+  "add":"${DOMAIN}",
+  "port":"${XRAY_PORT}",
+  "id":"${VMESS_UUID}",
+  "aid":"0",
+  "net":"ws",
+  "type":"none",
+  "host":"${DOMAIN}",
+  "path":"${VMESS_PATH}",
+  "tls":"tls"
+}
+EOF
+)
+    VMESS_LINK="vmess://$(echo -n "${VMESS_JSON}" | base64 -w 0)"
+
+    # Save credentials
+    echo "tlsws_port=${XRAY_PORT}" >> /root/.ports
+    echo "vless_uuid=${VLESS_UUID}" >> /root/.ports
+    echo "vmess_uuid=${VMESS_UUID}" >> /root/.ports
+    echo "trojan_pass=${TROJAN_PASS}" >> /root/.ports
+    echo "ss_method=${SS_METHOD}" >> /root/.ports
+    echo "ss_pass=${SS_PASS}" >> /root/.ports
+
+    # Public config file
+    cat > /var/www/html/xray_tls_ws.txt << EOF
+===========================================
+XRAY ALL TLS WS CONFIG (8444)
+===========================================
+
+DOMAIN : ${DOMAIN}
+PORT   : ${XRAY_PORT}
+TLS    : ENABLED
+
+--- VLESS ---
+vless://${VLESS_UUID}@${DOMAIN}:${XRAY_PORT}?encryption=none&security=tls&type=ws&path=${VLESS_PATH}#VLESS_8444
+
+--- VMESS ---
+${VMESS_LINK}
+
+--- TROJAN ---
+trojan://${TROJAN_PASS}@${DOMAIN}:${XRAY_PORT}?security=tls&type=ws&path=${TROJAN_PATH}#TROJAN_8444
+
+--- SHADOWSOCKS ---
+Method : ${SS_METHOD}
+Pass   : ${SS_PASS}
+Path   : ${SS_PATH}
+ss://${SS_METHOD}:${SS_PASS}@${DOMAIN}:${XRAY_PORT}?plugin=v2ray-plugin;tls;host=${DOMAIN};path=${SS_PATH}#SS_TLS_WS_8444
+
+===========================================
+EOF
+
+    chmod 644 /var/www/html/xray_tls_ws.txt
+    echo "Xray ALL protocols installed on port 8444"
+    echo "Config: https://${DOMAIN}:81/xray_tls_ws.txt"
+}
+
+#====================================================
+#   Install NaiveProxy (Chrome Network Stack)
+#====================================================
+install_naiveproxy() {
+    echo "Installing NaiveProxy..."
+    {
+    # Install Caddy
+    apt install -y debian-keyring debian-archive-keyring apt-transport-https
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+    apt update
+    apt install -y caddy
+    
+    # Generate credentials
+    NAIVE_USER="user_$(openssl rand -hex 4)"
+    
+    # Create Caddyfile
+    mkdir -p /etc/caddy
+    cat > /etc/caddy/Caddyfile << EOF
+:8090, ${server_ip}:8090 {
+    tls internal
+    
+    route {
+        forward_proxy {
+            basic_auth ${NAIVE_USER} ${AUTHSTR}
+            hide_ip
+            hide_via
+            probe_resistance
+        }
+        
+        reverse_proxy https://www.bing.com {
+            header_up Host {upstream_hostport}
+        }
+    }
+}
+EOF
+
+    # Restart Caddy
+    systemctl restart caddy
+    systemctl enable caddy
+    
+    echo "naive_port=8090" >> /root/.ports
+    echo "naive_user=${NAIVE_USER}" >> /root/.ports
+    echo "naive_pass=${AUTHSTR}" >> /root/.ports
+    } &>/dev/null
+}
+
+#====================================================
+#   Install Brook (Simple & Fast)
+#====================================================
+install_brook() {
+    echo "Installing Brook..."
+    {
+    # Download latest Brook
+    BROOK_VERSION=$(curl -s https://api.github.com/repos/txthinking/brook/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    wget -O /usr/local/bin/brook \
+        "https://github.com/txthinking/brook/releases/download/${BROOK_VERSION}/brook_linux_amd64"
+    
+    chmod +x /usr/local/bin/brook
+    
+    # Create systemd service
+    cat > /etc/systemd/system/brook.service << EOF
+[Unit]
+Description=Brook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/brook server --listen :9999 --password ${AUTHSTR}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable and start
+    systemctl daemon-reload
+    systemctl enable brook
+    systemctl start brook
+    
+    echo "brook_port=9999" >> /root/.ports
+    echo "brook_password=${AUTHSTR}" >> /root/.ports
+    } &>/dev/null
+}
+
+#====================================================
+#   Finalize Server Setup
+#====================================================
+install_rclocal() {
+    {
+    # Install needed tools
+    apt install -y lsof net-tools php-cli
+
+    # Fix Apache port
+    sed -i 's/Listen 80/Listen 81/g' /etc/apache2/ports.conf
+    systemctl restart apache2
+    systemctl restart stunnel4
+    systemctl restart hysteria-server
+    systemctl enable openvpn@server.service
+    systemctl start openvpn@server.service
+    systemctl enable openvpn@server2.service
+    systemctl start openvpn@server2.service
+
+    # Create dexter service
+    wget -O /etc/systemd/system/dexter.service "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/dexter.service"
+
+    # Create rc.local with watchdog + startup services
+    cat > /etc/rc.local << 'EOF'
+#!/bin/bash -e
+# Dexter VPN startup + watchdog
+
+# --- Boot-time setup ---
+iptables-restore < /etc/iptables_rules.v4
+ip6tables-restore < /etc/iptables_rules.v6
+sysctl -p
+
+service stunnel4 restart
+systemctl restart openvpn@server.service
+systemctl restart openvpn@server2.service
+systemctl restart hysteria-server.service
+
+# Unique screen sessions
+screen -dmS socks1 python /etc/socks-ssh.py 8000
+screen -dmS socks2 python /etc/socks-ws-ssh.py 8001
+screen -dmS socks3 python /etc/socks-ws-ssl.py 8002
+
+# UDPGW
+ps x | grep 'udpvpn' | grep -v 'grep' || screen -dmS udpvpn /usr/bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 10000 --max-connections-for-client 10 --client-socket-sndbuf 10000
+
+# PHP WebInfo
+screen -dmS webinfo php -S 0.0.0.0:5623 -t /root/.web/
+
+# Monitor script
+bash /etc/.monitor ulti
+
+# --- Watchdog loop ---
+LOGFILE="/var/log/dexter-vpn.log"
+SERVICE_TCP="openvpn@server"
+SERVICE_UDP="openvpn@server2"
+SERVICE_STUNNEL="stunnel4"
+SERVICE_HYST="hysteria-server"
+
+echo "[$(date)] Dexter VPN watchdog started" >> $LOGFILE
+
+while true; do
+    # TCP OpenVPN
+    if ! nc -z 127.0.0.1 443 >/dev/null 2>&1; then
+        echo "[$(date)] TCP 443 down, restarting $SERVICE_TCP" >> $LOGFILE
+        systemctl restart $SERVICE_TCP
+    fi
+
+    # UDP OpenVPN
+    if ! nc -uz 127.0.0.1 444 >/dev/null 2>&1; then
+        echo "[$(date)] UDP 444 down, restarting $SERVICE_UDP" >> $LOGFILE
+        systemctl restart $SERVICE_UDP
+    fi
+
+    # Stunnel4
+    if ! pgrep -x "stunnel4" >/dev/null; then
+        echo "[$(date)] stunnel4 down, restarting..." >> $LOGFILE
+        systemctl restart $SERVICE_STUNNEL
+    fi
+
+    # Hysteria
+    if ! systemctl is-active --quiet $SERVICE_HYST; then
+        echo "[$(date)] Hysteria server down, restarting..." >> $LOGFILE
+        systemctl restart $SERVICE_HYST
+    fi
+
+    sleep 30
+done
+
+exit 0
+EOF
+
+    # Permissions + enable rc.local
+    chmod +x /etc/rc.local
+    systemctl daemon-reload
+    systemctl enable rc.local
+    systemctl enable dexter
+    systemctl restart dexter.service
+    systemctl enable hysteria-server.service
+    systemctl restart hysteria-server.service
+
+    # Create WebInfo page
+    cat <<EOF > /root/.web/index.php
+Made with love by: Vollam LTD Developer...
+EOF
+
+    # Create ports config
+    cat <<EOF > /root/.ports
+tcp_port=TCP_PORT
+udp_port=UDP_PORT
+socket_port=80
+squid_port=8080
+hysteria_port=5666
+ssh_port=22
+dropbear_port=442
+slowdns_port=2222
+tcp_ssl_port=PORT_SSL
+udp_ssl_port=444
+EOF
+
+    sed -i "s|TCP_PORT|$PORT_TCP|g" /root/.ports
+    sed -i "s|UDP_PORT|$PORT_UDP|g" /root/.ports
+    sed -i "s|PORT_SSL|$PORT_SSL|g" /root/.ports
+    } &>/dev/null
+}
+
+#====================================================
+#   Install NGINX Web Panel for XRAY Configs
+#====================================================
+install_nginx_panel() {
+    clear
+    echo "Setting up NGINX web panel for XRAY configurations..."
+    
+    # Fix broken repositories first
+    echo "Fixing repositories..."
+    rm -f /etc/apt/sources.list.d/openvpn3.list
+    rm -f /etc/apt/sources.list.d/caddy-stable.list
+    
+    # Ensure main Ubuntu repositories are present
+    if ! grep -q "^deb.*ubuntu.*main" /etc/apt/sources.list; then
+        cat > /etc/apt/sources.list << 'REPOEOF'
+deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
+REPOEOF
+    fi
+    
+    # Install NGINX (show errors if any)
+    echo "Installing NGINX..."
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nginx openssl || {
+        echo "ERROR: Failed to install NGINX"
+        return 1
+    }
+    
+    # Create web directory
+    mkdir -p /var/www/html
+    
+    # Generate UUID for XRAY configs
+    XRAY_UUID=$(cat /proc/sys/kernel/random/uuid)
+    SERVER_IP=$(curl -s ipinfo.io/ip)
+    
+    # Create VMESS config file
+    cat > /var/www/html/vmess_config.txt << EOF
+==========================================
+      VMESS CONFIGURATION
+==========================================
+
+DOMAIN : ${DOMAIN}
+PORT   : ${XRAY_PORT}
+TLS    : ENABLED
+
+
+--- VMESS ---
+${VMESS_LINK}
+
+
+===========================================
+EOF
+
+    # Create VLESS config file
+    cat > /var/www/html/vless_config.txt << EOF
+==========================================
+      VLESS CONFIGURATION
+==========================================
+
+DOMAIN : ${DOMAIN}
+PORT   : ${XRAY_PORT}
+TLS    : ENABLED
+
+--- VLESS ---
+vless://${VLESS_UUID}@${DOMAIN}:${XRAY_PORT}?encryption=none&security=tls&type=ws&path=${VLESS_PATH}#VLESS_8444
+
+===========================================
+EOF
+
+    # Create Trojan config file
+    cat > /var/www/html/trojan_config.txt << EOF
+==========================================
+      TROJAN CONFIGURATION
+==========================================
+
+DOMAIN : ${DOMAIN}
+PORT   : ${XRAY_PORT}
+TLS    : ENABLED
+
+
+--- TROJAN ---
+trojan://${TROJAN_PASS}@${DOMAIN}:${XRAY_PORT}?security=tls&type=ws&path=${TROJAN_PATH}#TROJAN_8444
+
+
+===========================================
+EOF
+
+    # Create Shadowsocks config file
+    cat > /var/www/html/ss_config.txt << EOF
+==========================================
+      SHADOWSOCKS CONFIGURATION
+==========================================
+
+
+DOMAIN : ${DOMAIN}
+PORT   : ${XRAY_PORT}
+TLS    : ENABLED
+Method : ${SS_METHOD}
+Pass   : ${SS_PASS}
+Path   : ${SS_PATH}
+
+ss://${SS_METHOD}:${SS_PASS}@${DOMAIN}:${XRAY_PORT}?plugin=v2ray-plugin%3Btls%3Bhost%3D${DOMAIN}%3Bpath%3D${SS_PATH}#SS_TLS_WS_8444
+
+===========================================
+EOF
+
+    # Set permissions
+    chmod 644 /var/www/html/*.txt
+    
+    # Create symlinks for alternative filenames (panel compatibility)
+    cd /var/www/html
+    # Standard variations (_conf.txt)
+    ln -sf vmess_config.txt vmess_conf.txt
+    ln -sf vless_config.txt vless_conf.txt
+    ln -sf trojan_config.txt trojan_conf.txt
+    ln -sf ss_config.txt ss_conf.txt
+    ln -sf xray_tls_ws.txt xray_tls_ws_conf.txt
+
+    
+    # Generate self-signed SSL certificate
+    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+      -subj "/C=US/ST=State/L=City/O=Organization/CN=xray" \
+      -keyout /etc/ssl/private/xray.key \
+      -out /etc/ssl/certs/xray.crt 2>/dev/null
+    
+    # Configure NGINX for port 81
+    cat > /etc/nginx/sites-available/xray-panel << 'NGINXEOF'
+server {
+    listen 81 ssl;
+    server_name _;
+    
+    ssl_certificate /etc/ssl/certs/xray.crt;
+    ssl_certificate_key /etc/ssl/private/xray.key;
+    
+    root /var/www/html;
+    index index.html;
+    
+    location / {
+        autoindex on;
+        try_files $uri $uri/ =404;
+    }
+    
+    location ~ \.txt$ {
+        add_header Content-Type text/plain;
+    }
+}
+NGINXEOF
+
+    # Enable the site
+    ln -sf /etc/nginx/sites-available/xray-panel /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+    
+    # Disable Caddy if it exists (conflicts with NGINX)
+    systemctl stop caddy 2>/dev/null || true
+    systemctl disable caddy 2>/dev/null || true
+    
+    # Test and reload NGINX
+    nginx -t && systemctl restart nginx
+    systemctl enable nginx
+    
+    # Open firewall port 81
+    iptables -C INPUT -p tcp --dport 81 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 81 -j ACCEPT
+    
+    # Install netfilter-persistent if not already installed
+    if ! command -v netfilter-persistent &> /dev/null; then
+        echo "Installing netfilter-persistent..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
+    fi
+    
+    # Save iptables rules
+    netfilter-persistent save 2>/dev/null || true
+    
+    # Update database with XRAY information
+    if [ -n "$HOST" ] && [ -n "$USER" ] && [ -n "$DBNAME" ]; then
+        mysql -h"$HOST" -u"$USER" -p"$PASS" "$DBNAME" -e "UPDATE server_list SET xray_status='active', xray_tls='8444', xray_ntls='8444', xray_port='8444', xray_vmess='vmess_config', xray_vless='vless_config', xray_trojan='trojan_config', xray_ss='ss_config' WHERE server_ip='$server_ip';" 2>/dev/null || true
+    fi
+    
+    echo "✅ NGINX web panel installed on port 81"
+    echo "✅ XRAY configs available at https://${SERVER_IP}:81/"
+    
+    # Verify NGINX is running
+    systemctl is-active --quiet nginx && echo "✅ NGINX service is active" || echo "❌ NGINX service failed"
+}
+
+#====================================================
+#   Start Services
+#====================================================
+start_service() {
+    clear
+    echo 'Starting..'
+    {
+# Define the jobs we need
+jobs=$(cat <<'EOF'
+* * * * * pgrep -x stunnel4 >/dev/null || /etc/init.d/stunnel4 restart
+* * * * * /bin/bash /etc/.ws >/dev/null 2>&1
+* * * * * /bin/bash /etc/.hysteria >/dev/null 2>&1
+* * * * * /bin/bash /etc/.monitor ulti >/dev/null 2>&1
+EOF
+)
+
+# Merge with existing crontab but avoid duplicates
+(crontab -l 2>/dev/null; echo "$jobs") | sort -u | crontab -
+
+# Restart cron safely
+systemctl restart cron || service cron restart
+} &>/dev/null
+
+# Ensure all critical services are running
+echo "Starting all services..."
+systemctl restart openvpn@server openvpn@server2 2>/dev/null || true
+systemctl restart ssh dropbear stunnel4 squid 2>/dev/null || true
+systemctl restart nginx serverinfo 2>/dev/null || true
+systemctl restart client-sldns server-sldns 2>/dev/null || true
+
+# Display installation summary
+echo ""
+echo "========================================="
+echo "    INSTALLATION COMPLETED!"
+echo "========================================="
+echo ""
+echo "Server IP: $server_ip"
+echo "Web Panel: https://${server_ip}:81/"
+echo "Server Info: http://${server_ip}:5623/server.txt"
+echo ""
+echo "Services Installed:"
+echo "  ✓ OpenVPN TCP: 1194"
+echo "  ✓ OpenVPN UDP: 110"
+echo "  ✓ OpenVPN TCP SSL: 443"
+echo "  ✓ OpenVPN UDP SSL: 444"
+echo "  ✓ Hysteria UDP: 5666"
+echo "  ✓ Hysteria2: 8443"
+echo "  ✓ TUIC: 8445"
+echo "  ✓ Xray vless/vmess tls ws: 8444"
+echo "  ✓ NaiveProxy: 8090"
+echo "  ✓ Brook: 9999"
+echo "  ✓ Squid Proxy: 8080"
+echo "  ✓ WebSocket: 80"
+echo "  ✓ SlowDNS: 5300"
+echo ""
+echo "SSH Access:"
+echo "  Username: azimaxus"
+echo "  Password: azim.0987Aa"
+echo ""
+echo "Configuration files available at:"
+echo "  https://${server_ip}:81/"
+echo "  http://${server_ip}:5623/server.txt"
+echo ""
+echo "Verifying services..."
+systemctl is-active --quiet nginx && echo "  ✅ NGINX: Running" || echo "  ❌ NGINX: Failed"
+systemctl is-active --quiet serverinfo && echo "  ✅ Server Info: Running" || echo "  ❌ Server Info: Failed"
+systemctl is-active --quiet openvpn@server && echo "  ✅ OpenVPN: Running" || echo "  ⚠️  OpenVPN: Check logs"
+echo ""
+echo "System will reboot in 10 seconds..."
+echo "========================================="
+echo ""
+
+# Wipe history
+history -c
+history -w
+rm -f /root/.bash_history /usr/local/etc/.system
+sleep 10
+reboot
+}
+
+#====================================================
+#   Setup Server Info Web Server (Port 5623)
+#====================================================
+setup_server_info() {
+    clear
+    echo 'Setting up server info web server...'
+    {
+    
+    # Create directory for server info
+    mkdir -p /var/www/html
+    
+    # Create server.txt with comprehensive server information
+    cat > /var/www/html/server.txt << 'EOF'
+===========================================
+    UBUNTU ULTIMATE VPN SERVER INFO
+===========================================
+
+Server IP: SERVER_IP_PLACEHOLDER
+Installation Date: INSTALL_DATE_PLACEHOLDER
+Server Location: SERVER_LOCATION_PLACEHOLDER
+Hostname: HOSTNAME_PLACEHOLDER
+DNS: DNS_PLACEHOLDER
+
+===========================================
+           INSTALLED SERVICES
+===========================================
+
+[OK] OpenVPN TCP: PORT_TCP_PLACEHOLDER
+[OK] OpenVPN UDP: PORT_UDP_PLACEHOLDER
+[OK] OpenVPN TCP SSL: PORT_SSL_PLACEHOLDER
+[OK] OpenVPN UDP SSL: 444
+[OK] Hysteria UDP: 5666, 20000-50000
+[OK] Hysteria2: 8443
+[OK] TUIC: 8445
+[OK] Xray VLESS/VMESS: 8444
+[OK] NaiveProxy: 8090
+[OK] Brook: 9999
+[OK] Squid Proxy: 8080, 8181
+[OK] WebSocket: 80
+[OK] SlowDNS: 5300
+[OK] SSH: 22
+[OK] SSH SSL: 445
+[OK] Dropbear: 442
+[OK] Dropbear SSL: 446
+
+===========================================
+           CONNECTION DETAILS
+===========================================
+
+Web Panel: https://SERVER_IP_PLACEHOLDER:81/
+Server Info: http://SERVER_IP_PLACEHOLDER:5623/server.txt
+SSH Access: SERVER_IP_PLACEHOLDER:22
+
+===========================================
+           HYSTERIA CONFIGURATION
+===========================================
+
+OBFS: OBFS_PLACEHOLDER
+AUTH_STR: username:password
+Ports: 5666, 20000-50000
+
+===========================================
+           SLOWDNS CONFIGURATION
+===========================================
+
+DNS URL: DNS_PLACEHOLDER
+SSH via DNS: 442
+DNS PUBLIC KEY: DNS_KEY_PLACEHOLDER
+
+===========================================
+           SERVER STATUS
+===========================================
+
+Status: [ONLINE]
+Last Updated: UPDATE_DATE_PLACEHOLDER
+Uptime: UPTIME_PLACEHOLDER
+
+===========================================
+           SUPPORT INFORMATION
+===========================================
+
+Panel URL: PANEL_URL_PLACEHOLDER
+API Status: [Connected]
+Database: [Connected]
+
+Website: www.vollam.com
+WhatsApp: https://wa.link/1cwolb
+
+===========================================
+EOF
+
+    # Replace placeholders with actual values
+    sed -i "s|SERVER_IP_PLACEHOLDER|$server_ip|g" /var/www/html/server.txt
+    sed -i "s|INSTALL_DATE_PLACEHOLDER|$(date)|g" /var/www/html/server.txt
+    sed -i "s|SERVER_LOCATION_PLACEHOLDER|$(curl -s ipinfo.io/city 2>/dev/null || echo "Unknown"), $(curl -s ipinfo.io/country 2>/dev/null || echo "Unknown")|g" /var/www/html/server.txt
+    sed -i "s|HOSTNAME_PLACEHOLDER|$DOMAIN|g" /var/www/html/server.txt
+    sed -i "s|DNS_PLACEHOLDER|$NS|g" /var/www/html/server.txt
+    sed -i "s|PORT_TCP_PLACEHOLDER|$PORT_TCP|g" /var/www/html/server.txt
+    sed -i "s|PORT_UDP_PLACEHOLDER|$PORT_UDP|g" /var/www/html/server.txt
+    sed -i "s|PORT_SSL_PLACEHOLDER|$PORT_SSL|g" /var/www/html/server.txt
+    sed -i "s|OBFS_PLACEHOLDER|$OBFS|g" /var/www/html/server.txt
+    sed -i "s|DNS_KEY_PLACEHOLDER|$(cat /root/.dns/server.pub 2>/dev/null || echo "Not available")|g" /var/www/html/server.txt
+    sed -i "s|UPDATE_DATE_PLACEHOLDER|$(date)|g" /var/www/html/server.txt
+    sed -i "s|UPTIME_PLACEHOLDER|$(uptime -p 2>/dev/null || echo "Unknown")|g" /var/www/html/server.txt
+    sed -i "s|PANEL_URL_PLACEHOLDER|${PANEL_URL:-"Not configured"}|g" /var/www/html/server.txt
+
+    # Setup systemd service for web server on port 5623
+    cat > /etc/systemd/system/serverinfo.service << 'SRVEOF'
+[Unit]
+Description=Server Info Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/html
+ExecStart=/usr/bin/python3 -m http.server 5623
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+SRVEOF
+
+    # Enable and start the web server
+    systemctl daemon-reload
+    systemctl enable serverinfo
+    systemctl start serverinfo
+    
+    # Open firewall port
+    iptables -C INPUT -p tcp --dport 5623 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 5623 -j ACCEPT
+    
+    # Install netfilter-persistent if not already installed
+    if ! command -v netfilter-persistent &> /dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
+    fi
+    
+    # Save iptables rules
+    netfilter-persistent save 2>/dev/null || true
+    
+    echo "Server info web server started on port 5623"
+    echo "Access: http://$server_ip:5623/server.txt"
+    
+    } &>/dev/null
+}
+
+#====================================================
+#   Main Execution
+#====================================================
+server_ip=$(curl -s ipinfo.io/ip)
+server_interface=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+serverVersion=$(awk -F'=' '/^VERSION_ID=/{gsub(/"/,""); print tolower($2)}' /etc/*-release)
+
+#install_sudo
+install_require
+install_hysteria
+installBBR
+optimize_tcp
+install_squid
+install_openvpn
+install_slowdns
+install_firewall_kvm
+install_stunnel
+install_hysteria2
+install_tuic
+install_tls_cert
+install_xray_tls_ws_all
+install_naiveproxy
+install_brook
+install_nginx_panel
+install_rclocal
+setup_server_info
+start_service
+
+# Final iptables save to ensure all rules are persistent
+echo "Saving final iptables rules..."
+
+# Ensure IP forwarding is enabled NOW and persists after reboot
+echo "Enabling IP forwarding..."
+sysctl -w net.ipv4.ip_forward=1
+if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+fi
+sysctl -p
+
+if command -v netfilter-persistent &> /dev/null; then
+    netfilter-persistent save
+    netfilter-persistent reload
+else
+    echo "Installing netfilter-persistent..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
+    netfilter-persistent save
+fi
+
+# Verify critical rules are in place
+echo "Verifying VPN internet access rules..."
+if ! iptables -t nat -L POSTROUTING -n | grep -q "MASQUERADE"; then
+    echo "WARNING: NAT MASQUERADE rules missing! Re-applying..."
+    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE
+    iptables -t nat -A POSTROUTING -o "$server_interface" -j MASQUERADE
+    netfilter-persistent save
+fi
+
+if ! iptables -L FORWARD -n | grep -q "10.8.0.0/24"; then
+    echo "WARNING: FORWARD rules missing! Re-applying..."
+    iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT
+    iptables -I FORWARD -d 10.8.0.0/24 -j ACCEPT
+    netfilter-persistent save
+fi
+
+echo "✅ Installation complete!"
+echo "✅ VPN internet access configured"
+echo "✅ All firewall rules saved"
