@@ -53,9 +53,14 @@ OBFS='mtk';
 HYSTERIA_TYPE='default';
 API_LINK="https://mtkvip.store/api/authentication"
 API_KEY="azimaxus"
-DOMAIN="v1.mtk-tunnel.xyz"
-NS="v2.mtk-tunnel.xyzz"
+DOMAIN="mtk1.mtkvip.store"
+NS="ns1.mtkvip.store"
 AUTHSTR="${AUTHSTR:-admin123}"
+XRAY_PORT=8444
+VLESS_PATH="/vless"
+VMESS_PATH="/vmess"
+TROJAN_PATH="/trojan"
+SS_PATH="/ss" 
 
 #---------------[ Timezone ]-------------------------
 timedatectl set-timezone Asia/Manila
@@ -97,19 +102,19 @@ install_require() {
             debian)
                 VERSION_ID=$(echo "$VERSION_ID" | cut -d. -f1)
                 if [ "$VERSION_ID" -lt 11 ] || [ "$VERSION_ID" -gt 13 ]; then
-                    echo "[ERROR] Unsupported Debian version ($VERSION_ID). Only 11, 12 & 13 are supported."
+                    echo "[ERROR] Unsupported Debian version ($VERSION_ID). Only 11–13 supported."
                     return 1
                 fi
                 ;;
             ubuntu)
                 VERSION_ID=$(echo "$VERSION_ID" | cut -d. -f1)
                 if [ "$VERSION_ID" -lt 22 ] || [ "$VERSION_ID" -gt 24 ]; then
-                    echo "[ERROR] Unsupported Ubuntu version ($VERSION_ID). Only 22.04–24.04 are supported."
+                    echo "[ERROR] Unsupported Ubuntu version ($VERSION_ID). Only 22–24 supported."
                     return 1
                 fi
                 ;;
             *)
-                echo "[ERROR] This script only supports Debian 11–13 and Ubuntu 22.04–24.04. Detected: $ID"
+                echo "[ERROR] Unsupported OS: $ID"
                 return 1
                 ;;
         esac
@@ -118,112 +123,84 @@ install_require() {
         return 1
     fi
 
-    # --- Environment ---
     export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     export DEBIAN_FRONTEND=noninteractive
 
-    # --- Update repos ---
-    apt-get update -qq
-
-    # --- Common packages ---
-    PACKAGES_COMMON=(
-        curl wget gnupg2 apt-transport-https ca-certificates lsb-release
-        cron python3 python3-pip python3-minimal libpython3-stdlib
-        iptables netcat-openbsd httpie php neofetch vnstat php-mysql
-        screen squid stunnel4 dropbear gnutls-bin
-        dos2unix nano unzip jq virt-what net-tools
-        mlocate dh-make libaudit-dev build-essential fail2ban
-    )
+    # --- Update & common packages ---
+    apt update -y
+    PACKAGES_COMMON=(curl wget gnupg2 apt-transport-https ca-certificates lsb-release cron python3 python3-pip iptables netcat-openbsd httpie php neofetch vnstat php-mysql screen squid stunnel4 gnutls-bin dos2unix nano unzip jq virt-what net-tools mlocate dh-make libaudit-dev build-essential fail2ban)
 
     # --- DB client + codename ---
-    if [ "$ID" = "debian" ]; then
-        case "$VERSION_ID" in
-            11) PACKAGES_EXTRA=(mariadb-client); CODENAME="bullseye" ;;
-            12) PACKAGES_EXTRA=(default-mysql-client); CODENAME="bookworm" ;;
-            13) PACKAGES_EXTRA=(default-mysql-client); CODENAME="trixie" ;;
-        esac
-    elif [ "$ID" = "ubuntu" ]; then
-        case "$VERSION_ID" in
-            22) PACKAGES_EXTRA=(default-mysql-client); CODENAME="jammy" ;;
-            23) PACKAGES_EXTRA=(default-mysql-client); CODENAME="mantic" ;;
-            24) PACKAGES_EXTRA=(default-mysql-client); CODENAME="noble" ;;
-        esac
-    fi
+    PACKAGES_EXTRA=()
+    case "$ID" in
+        debian)
+            case "$VERSION_ID" in
+                11) PACKAGES_EXTRA=(mariadb-client); CODENAME="bullseye" ;;
+                12) PACKAGES_EXTRA=(default-mysql-client); CODENAME="bookworm" ;;
+                13) PACKAGES_EXTRA=(default-mysql-client); CODENAME="trixie" ;;
+            esac
+            ;;
+        ubuntu)
+            case "$VERSION_ID" in
+                22) PACKAGES_EXTRA=(default-mysql-client); CODENAME="jammy" ;;
+                23) PACKAGES_EXTRA=(default-mysql-client); CODENAME="mantic" ;;
+                24) PACKAGES_EXTRA=(default-mysql-client); CODENAME="noble" ;;
+            esac
+            ;;
+    esac
 
     # --- Install packages ---
     for pkg in "${PACKAGES_COMMON[@]}" "${PACKAGES_EXTRA[@]}"; do
         echo "[INFO] Installing: $pkg"
-        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$pkg"; then
-            echo "[WARN] Failed to install: $pkg (skipping)"
-        fi
+        DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends "$pkg" || echo "[WARN] Failed: $pkg (skipping)"
     done
 
-    # --- Detect architecture ---
+    # --- Detect arch ---
     ARCH=$(dpkg --print-architecture)
-    case "$ARCH" in
-        amd64|arm64|armhf)
-            echo "[INFO] Detected architecture: $ARCH"
-            ;;
-        *)
-            echo "[WARN] Unsupported arch detected: $ARCH → falling back to amd64"
-            ARCH="amd64"
-            ;;
-    esac
+    [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" && "$ARCH" != "armhf" ]] && ARCH="amd64"
 
-    # --- Add official OpenVPN repo ---
-    echo "[INFO] Adding OpenVPN repo for $ID $VERSION_ID ($CODENAME, $ARCH)..."
-    curl -fsSL https://packages.openvpn.net/packages-repo.gpg | gpg --dearmor -o /usr/share/keyrings/openvpn.gpg
-    echo "deb [arch=$ARCH signed-by=/usr/share/keyrings/openvpn.gpg] https://packages.openvpn.net/openvpn3/$ID $CODENAME main" > /etc/apt/sources.list.d/openvpn.list
-
-    # --- Install OpenVPN (non-interactive) ---
-    apt-get update -qq
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends --allow-downgrades --allow-change-held-packages openvpn; then
-        echo "[ERROR] Failed to install OpenVPN"
-        return 1
+    # --- OpenVPN installation ---
+    if [[ "$ID" == "ubuntu" && "$VERSION_ID" -ge 22 ]]; then
+        echo "[INFO] Using Ubuntu repo for OpenVPN (Jammy+)"
+        apt install -y --no-install-recommends openvpn || echo "[WARN] Failed to install OpenVPN from Ubuntu repo"
+    else
+        echo "[INFO] Adding official OpenVPN 3 repo for $CODENAME"
+        curl -fsSL https://packages.openvpn.net/packages-repo.gpg | gpg --dearmor -o /usr/share/keyrings/openvpn.gpg
+        echo "deb [arch=$ARCH signed-by=/usr/share/keyrings/openvpn.gpg] https://packages.openvpn.net/openvpn3/$ID $CODENAME main" > /etc/apt/sources.list.d/openvpn.list
+        apt update -y
+        apt install -y --no-install-recommends openvpn || echo "[WARN] Failed to install OpenVPN from OpenVPN repo"
     fi
 
-    {
-        # --- Firewall cleanup ---
-        systemctl stop firewalld 2>/dev/null || true
-        systemctl disable firewalld 2>/dev/null || true
-        systemctl stop nftables 2>/dev/null || true
-        systemctl disable nftables 2>/dev/null || true
-        systemctl stop ufw 2>/dev/null || true
-        systemctl disable ufw 2>/dev/null || true
+    # --- Firewall cleanup & cron ---
+    systemctl stop firewalld nftables ufw 2>/dev/null || true
+    systemctl disable firewalld nftables ufw 2>/dev/null || true
+    systemctl enable --now cron
 
-        # --- Cron setup ---
-        touch /var/spool/cron/crontabs/root
-        chmod 600 /var/spool/cron/crontabs/root
-        systemctl enable --now cron
+    # --- Prepare directories ---
+    mkdir -p /usr/local/bin /usr/local/var/run /root/.web
+    chmod 777 /root/.web
 
-        # --- Prevent missing bin dirs ---
-        mkdir -p /usr/local/bin /usr/local/var/run /root/.web
-        chmod 777 /root/.web
+    # --- Configure OpenSSH ---
+    echo "[INFO] Configuring OpenSSH..."
+    systemctl enable ssh
+    sed -i '/^#\?AddressFamily/d' /etc/ssh/sshd_config
+    echo "AddressFamily any" >> /etc/ssh/sshd_config
+    sed -i '/^#\?ListenAddress/d' /etc/ssh/sshd_config
+    echo "ListenAddress 0.0.0.0" >> /etc/ssh/sshd_config
+    echo "ListenAddress ::" >> /etc/ssh/sshd_config
 
-        # --- Configure OpenSSH ---
-        echo "[INFO] Configuring OpenSSH..."
-        systemctl stop ssh.socket >/dev/null 2>&1 || true
-        systemctl disable ssh.socket >/dev/null 2>&1 || true
-        systemctl enable ssh.service
-
-        sed -i '/^#\?AddressFamily/d' /etc/ssh/sshd_config
-        echo "AddressFamily any" >> /etc/ssh/sshd_config
-        sed -i '/^#\?ListenAddress/d' /etc/ssh/sshd_config
-        echo "ListenAddress 0.0.0.0" >> /etc/ssh/sshd_config
-        echo "ListenAddress ::" >> /etc/ssh/sshd_config
-
-        # Ensure SSH auto-restarts
-        mkdir -p /etc/systemd/system/ssh.service.d
-        cat > /etc/systemd/system/ssh.service.d/override.conf <<EOF
+    mkdir -p /etc/systemd/system/ssh.service.d
+    cat > /etc/systemd/system/ssh.service.d/override.conf <<EOF
 [Service]
 Restart=always
 RestartSec=5
 StartLimitIntervalSec=0
 EOF
 
-        # --- Configure Dropbear (port 442) ---
-        echo "[INFO] Configuring Dropbear..."
-        cat > /etc/default/dropbear <<EOF
+    # --- Configure Dropbear ---
+    echo "[INFO] Configuring Dropbear..."
+    mkdir -p /etc/systemd/system/dropbear.service.d
+    cat > /etc/default/dropbear <<EOF
 NO_START=0
 DROPBEAR_PORT=442
 DROPBEAR_EXTRA_ARGS=
@@ -231,27 +208,24 @@ DROPBEAR_BANNER="/etc/banner"
 DROPBEAR_RECEIVE_WINDOW=65536
 EOF
 
-        mkdir -p /etc/systemd/system/dropbear.service.d
-        cat > /etc/systemd/system/dropbear.service.d/override.conf <<EOF
+    cat > /etc/systemd/system/dropbear.service.d/override.conf <<EOF
 [Service]
 Restart=always
 RestartSec=5
 StartLimitIntervalSec=0
 EOF
 
-        # --- Download banner ---
-        wget -q -O /etc/banner "https://raw.githubusercontent.com/EskalarteDexter/Autoscript/main/SshBanner"
-        chmod 644 /etc/banner
+    wget -q -O /etc/banner "https://raw.githubusercontent.com/EskalarteDexter/Autoscript/main/SshBanner"
+    chmod 644 /etc/banner
 
-        # --- Reload systemd + restart services ---
-        systemctl daemon-reexec
-        systemctl daemon-reload
-        systemctl enable ssh dropbear
-        systemctl restart ssh dropbear
-    } &>/dev/null
+    systemctl daemon-reexec
+    systemctl daemon-reload
+    systemctl enable ssh dropbear
+    systemctl restart ssh dropbear
 
-    echo "[INFO] Dependencies + latest OpenVPN (via official repo), OpenSSH (22), and Dropbear (442) setup completed."
+    echo "[INFO] Dependencies + OpenVPN, OpenSSH (22), Dropbear (442) setup completed."
 }
+
 
 #====================================================
 #   Install Hysteria UDP
@@ -831,84 +805,102 @@ systemctl start server-sldns
 } &>/dev/null
 }
 
-#====================================================
-#   Install Firewall & Iptables
-#====================================================
 install_firewall_kvm() {
-clear
-# --- Enable IP forwarding & disable rp_filter (no duplicates) ---
-grep -qxF "net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-grep -qxF "net.ipv4.conf.all.rp_filter=0" /etc/sysctl.conf || echo "net.ipv4.conf.all.rp_filter=0" >> /etc/sysctl.conf
-grep -qxF "net.ipv4.conf.${server_interface}.rp_filter=0" /etc/sysctl.conf || echo "net.ipv4.conf.${server_interface}.rp_filter=0" >> /etc/sysctl.conf
-sysctl -p
+    clear
+    echo "[INFO] Setting up firewall and iptables..."
 
-# --- NAT rules for UDP traffic ---
- iptables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 10000:50000 -j DNAT --to-destination :5666 2>/dev/null || iptables -t nat -A PREROUTING -i "$server_interface" -p udp --dport 10000:50000 -j DNAT --to-destination :5666
+    if [ -z "$server_interface" ]; then
+        echo "[ERROR] server_interface is not set"
+        return 1
+    fi
 
-# OpenVPN NAT/MASQUERADE for internet access
-iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE
-iptables -t nat -C POSTROUTING -s 10.9.0.0/24 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o "$server_interface" -j MASQUERADE
+    SYSCTL_CONF="/etc/sysctl.d/99-kvm-firewall.conf"
 
-# Hysteria NAT rules
-iptables -t nat -C POSTROUTING -s 10.20.0.0/22 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.20.0.0/22 -o "$server_interface" -j MASQUERADE
-iptables -t nat -C POSTROUTING -s 10.30.0.0/22 -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.30.0.0/22 -o "$server_interface" -j MASQUERADE
+    cat > "$SYSCTL_CONF" <<EOF
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.${server_interface}.rp_filter=0
+EOF
 
-# CRITICAL: Enable MASQUERADE for ALL VPN traffic to internet
-iptables -t nat -C POSTROUTING -o "$server_interface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o "$server_interface" -j MASQUERADE
+    sysctl --system
 
-# Allow forwarding for VPN clients
-iptables -C FORWARD -i tun+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun+ -j ACCEPT
-iptables -C FORWARD -o tun+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -o tun+ -j ACCEPT
-iptables -C FORWARD -i "$server_interface" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$server_interface" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -C FORWARD -i tun+ -o "$server_interface" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun+ -o "$server_interface" -j ACCEPT
+    export DEBIAN_FRONTEND=noninteractive
 
-# --- UDP flood protection ---
-iptables -C INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --update --seconds 30 --hitcount 10 --name DEFAULT --mask 255.255.255.255 --rsource -j DROP 2>/dev/null || iptables -A INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --update --seconds 30 --hitcount 10 --name DEFAULT --mask 255.255.255.255 --rsource -j DROP
-iptables -C INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --set --name DEFAULT --mask 255.255.255.255 --rsource 2>/dev/null || iptables -A INPUT -p udp --dport 20100:20900 -m state --state NEW -m recent --set --name DEFAULT --mask 255.255.255.255 --rsource
+    sudo add-apt-repository -y universe
+    sudo apt update
 
-# --- Ensure SSH port 22 is open ---
-iptables -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 22 -j ACCEPT
+    sudo apt install -y socat
+    sudo apt install -y iptables
+    sudo apt install -y iptables-persistent
+    sudo apt install -y netfilter-persistent
 
-# --- DNS redirection ---
-iptables -C INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 5300 -j ACCEPT
-iptables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || iptables -t nat -I PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300
+    sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+    sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 
-if command -v ip6tables >/dev/null 2>&1; then
-ip6tables -C INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport 5300 -j ACCEPT
-ip6tables -t nat -C PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || ip6tables -t nat -I PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300
-fi
+    iptables -F
+    iptables -t nat -F
+    iptables -X
 
-# --- Persist iptables rules ---
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT ACCEPT
 
-export DEBIAN_FRONTEND=noninteractive
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-# ========================
-# SYSTEM UPDATE & DEPENDENCIES
-# ========================
-apt update -y && apt upgrade -y
-apt install -y curl socat iptables-persistent netfilter-persistent
+    iptables -t nat -A PREROUTING -i "$server_interface" -p udp --dport 10000:50000 -j DNAT --to-destination :5666
 
-# ========================
-# PERSIST IPTABLES
-# ========================
-netfilter-persistent save
-netfilter-persistent reload
+    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE
+    iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o "$server_interface" -j MASQUERADE
+    iptables -t nat -A POSTROUTING -s 10.20.0.0/22 -o "$server_interface" -j MASQUERADE
+    iptables -t nat -A POSTROUTING -s 10.30.0.0/22 -o "$server_interface" -j MASQUERADE
 
-# ========================
-# INCREASE FILE DESCRIPTOR LIMITS
-# ========================
-sed -i '/^\*\s\+soft\s\+nofile/d' /etc/security/limits.conf
-sed -i '/^\*\s\+hard\s\+nofile/d' /etc/security/limits.conf
-echo '* soft nofile 65536' >> /etc/security/limits.conf
-echo '* hard nofile 65536' >> /etc/security/limits.conf
+    iptables -t nat -A POSTROUTING -o "$server_interface" -j MASQUERADE
 
-sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/system.conf
-echo 'DefaultLimitNOFILE=65536' >> /etc/systemd/system.conf
-sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/user.conf
-echo 'DefaultLimitNOFILE=65536' >> /etc/systemd/user.conf
-systemctl daemon-reexec
-echo "[INFO] Firewall setup completed"
+    iptables -A FORWARD -i tun+ -j ACCEPT
+    iptables -A FORWARD -o tun+ -j ACCEPT
+    iptables -A FORWARD -i "$server_interface" -o tun+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A FORWARD -i tun+ -o "$server_interface" -j ACCEPT
+
+    iptables -A INPUT -p udp --dport 20100:20900 -m conntrack --ctstate NEW -m recent --update --seconds 30 --hitcount 10 --name UDPFLOOD --rsource -j DROP
+    iptables -A INPUT -p udp --dport 20100:20900 -m conntrack --ctstate NEW -m recent --set --name UDPFLOOD --rsource
+
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    iptables -A INPUT -p udp --dport 5300 -j ACCEPT
+
+    iptables -t nat -A PREROUTING -i "$server_interface" -p udp --dport 53 -j REDIRECT --to-ports 5300
+
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -P INPUT DROP
+        ip6tables -P FORWARD DROP
+        ip6tables -P OUTPUT ACCEPT
+        ip6tables -A INPUT -i lo -j ACCEPT
+        ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        ip6tables -A INPUT -p udp --dport 5300 -j ACCEPT
+    fi
+
+    netfilter-persistent save
+    netfilter-persistent reload
+
+    LIMITS_CONF="/etc/security/limits.d/99-nofile.conf"
+
+    cat > "$LIMITS_CONF" <<EOF
+* soft nofile 65536
+* hard nofile 65536
+EOF
+
+    sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/system.conf
+    sed -i '/^DefaultLimitNOFILE/d' /etc/systemd/user.conf
+
+    echo "DefaultLimitNOFILE=65536" >> /etc/systemd/system.conf
+    echo "DefaultLimitNOFILE=65536" >> /etc/systemd/user.conf
+
+    systemctl daemon-reexec
+
+    echo "[INFO] Firewall setup completed successfully!"
 }
+
+
 
 #====================================================
 #   Install Stunnel & Dropbear
@@ -1024,14 +1016,11 @@ install_hysteria2() {
     
     # Generate self-signed certificate (reuse if exists from Hysteria 1)
     if [ ! -f /etc/hysteria/server.crt ]; then
-        openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
-            -keyout /etc/hysteria/server.key \
-            -out /etc/hysteria/server.crt \
-            -subj "/CN=bing.com" \
-            -days 36500
-        chmod 600 /etc/hysteria/server.key
-        chmod 644 /etc/hysteria/server.crt
-    fi
+    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) -keyout /etc/hysteria/server.key -out /etc/hysteria/server.crt -subj "/CN=bing.com" -days 36500
+    chmod 600 /etc/hysteria/server.key
+    chmod 644 /etc/hysteria/server.crt
+fi
+
     
     # Create Hysteria 2 config with authentication
     cat > /etc/hysteria/config2.yaml << EOF
@@ -1107,8 +1096,7 @@ install_tuic() {
     TUIC_VERSION=$(curl -s https://api.github.com/repos/EAimTY/tuic/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
     
     # Download TUIC server
-    wget -O /usr/local/bin/tuic-server \
-        "https://github.com/EAimTY/tuic/releases/download/${TUIC_VERSION}/tuic-server-${TUIC_VERSION}-x86_64-unknown-linux-gnu"
+    wget -O /usr/local/bin/tuic-server "https://github.com/EAimTY/tuic/releases/download/${TUIC_VERSION}/tuic-server-${TUIC_VERSION}-x86_64-unknown-linux-gnu"
     
     chmod +x /usr/local/bin/tuic-server
     
@@ -1171,51 +1159,52 @@ EOF
     } &>/dev/null
 }
 
-#====================================================
-#   Install Xray vless/vmess (Anti-Censorship)
-#====================================================
-install_tls_cert() {
-    # Generate a random Gmail email automatically
-    RANDOM_EMAIL="xray-$(openssl rand -hex 5)@gmail.com"
-    echo "Using auto-generated email: ${RANDOM_EMAIL}"
-
-apt update && apt upgrade -y
-apt install curl socat -y
-curl https://get.acme.sh | sh                               
-~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-~/.acme.sh/acme.sh --register-account -m "${AUTO_EMAIL}"
-~/.acme.sh/acme.sh --issue -d "${DOMAIN}" --standalone
-~/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" --key-file /etc/ssl/xray/private.key --fullchain-file /etc/ssl/xray/fullchain.pem
-
-    echo "Certificate installed successfully for ${DOMAIN} using ${RANDOM_EMAIL}"
-}
-
 
 install_xray_tls_ws_all() {
-  # Install Xray if missing
-    if [ ! -f /usr/local/bin/xray ]; then
-        bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)
-    fi
+# Auto-generate credentials
+VLESS_UUID=$(cat /proc/sys/kernel/random/uuid)
+VMESS_UUID=$(cat /proc/sys/kernel/random/uuid)
+TROJAN_PASS=$(openssl rand -hex 16)
+SS_PASS=$(openssl rand -hex 16)
+SS_METHOD="aes-128-gcm"
+AUTO_EMAIL="xray-$(openssl rand -hex 5)@gmail.com"
 
-    # Generate credentials
-    VLESS_UUID=$(cat /proc/sys/kernel/random/uuid)
-    VMESS_UUID=$(cat /proc/sys/kernel/random/uuid)
-    TROJAN_PASS=$(openssl rand -hex 16)
-    SS_PASS=$(openssl rand -hex 16)
-    SS_METHOD="aes-128-gcm"
+echo "Using auto-generated email: $AUTO_EMAIL"
 
-    VLESS_PATH="/vless"
-    VMESS_PATH="/vmess"
-    TROJAN_PATH="/trojan"
-    SS_PATH="/ss"
+# ========================
+# INSTALL ACME.SH
+# ========================
+curl https://get.acme.sh | sh
+chmod +x /root/.acme.sh/acme.sh
+ACME="/root/.acme.sh/acme.sh"
+$ACME --set-default-ca --server letsencrypt
+$ACME --register-account -m "${AUTO_EMAIL}" --force
 
-    CERT_PATH="/etc/ssl/xray/fullchain.pem"
-    KEY_PATH="/etc/ssl/xray/private.key"
+# ========================
+# TLS CERTIFICATE (DNS-01 because port 80 busy)
+# ========================
+echo "⚡ Using DNS-01 mode for TLS because port 80 is busy"
+# Example for Cloudflare API (replace with your own credentials)
+export CF_Email="mtkgenuine@gmail.com"
+export CF_Key="5d386162a1bac6f91189a93c6a966478a5bfa"
 
-    mkdir -p /etc/xray/tlsws
+$ACME --issue -d "${DOMAIN}" --dns dns_cf --force
+mkdir -p /root/
+$ACME --install-cert -d "${DOMAIN}" --key-file /root/private.key --fullchain-file /root/fullchain.pem
 
-    # Create Xray config
-    cat > /etc/xray/tlsws/config.json << EOF
+
+# ========================
+# INSTALL XRAY
+# ========================
+if [ ! -f /usr/local/bin/xray ]; then
+    bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)
+fi
+
+# ========================
+# XRAY CONFIG
+# ========================
+mkdir -p /etc/xray/tlsws
+cat > /etc/xray/tlsws/config.json << EOF
 {
   "log": { "loglevel": "warning" },
   "inbounds": [
@@ -1236,7 +1225,7 @@ install_xray_tls_ws_all() {
         "network": "ws",
         "security": "tls",
         "tlsSettings": {
-          "certificates": [ { "certificateFile": "${CERT_PATH}", "keyFile": "${KEY_PATH}" } ]
+          "certificates": [ { "certificateFile": "/root/fullchain.pem", "keyFile": "/root/private.key" } ]
         },
         "wsSettings": { "path": "${VLESS_PATH}" }
       }
@@ -1249,8 +1238,10 @@ install_xray_tls_ws_all() {
 }
 EOF
 
-    # Create systemd service
-    cat > /etc/systemd/system/xray-tlsws.service << EOF
+# ========================
+# SYSTEMD SERVICE
+# ========================
+cat > /etc/systemd/system/xray-tlsws.service << EOF
 [Unit]
 Description=Xray ALL TLS WebSocket (8444)
 After=network.target
@@ -1265,39 +1256,26 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable xray-tlsws
-    systemctl restart xray-tlsws
+systemctl daemon-reload
+systemctl enable xray-tlsws
+systemctl restart xray-tlsws
 
-    # Generate VMess Base64
-    VMESS_JSON=$(cat << EOF
-{
-  "v":"2",
-  "ps":"VMESS_TLS_WS_8444",
-  "add":"${DOMAIN}",
-  "port":"${XRAY_PORT}",
-  "id":"${VMESS_UUID}",
-  "aid":"0",
-  "net":"ws",
-  "type":"none",
-  "host":"${DOMAIN}",
-  "path":"${VMESS_PATH}",
-  "tls":"tls"
-}
-EOF
-)
-    VMESS_LINK="vmess://$(echo -n "${VMESS_JSON}" | base64 -w 0)"
 
-    # Save credentials
-    echo "tlsws_port=${XRAY_PORT}" >> /root/.ports
-    echo "vless_uuid=${VLESS_UUID}" >> /root/.ports
-    echo "vmess_uuid=${VMESS_UUID}" >> /root/.ports
-    echo "trojan_pass=${TROJAN_PASS}" >> /root/.ports
-    echo "ss_method=${SS_METHOD}" >> /root/.ports
-    echo "ss_pass=${SS_PASS}" >> /root/.ports
+# ========================
+# SAVE CREDENTIALS
+# ========================
+echo "tlsws_port=${XRAY_PORT}" >> /root/.ports
+echo "vless_uuid=${VLESS_UUID}" >> /root/.ports
+echo "vmess_uuid=${VMESS_UUID}" >> /root/.ports
+echo "trojan_pass=${TROJAN_PASS}" >> /root/.ports
+echo "ss_method=${SS_METHOD}" >> /root/.ports
+echo "ss_pass=${SS_PASS}" >> /root/.ports
 
-    # Public config file
-    cat > /var/www/html/xray_tls_ws.txt << EOF
+# ========================
+# PUBLIC CONFIG FILE
+# ========================
+mkdir -p /var/www/html
+cat > /var/www/html/xray_tls_ws.txt << EOF
 ===========================================
 XRAY ALL TLS WS CONFIG (8444)
 ===========================================
@@ -1310,7 +1288,7 @@ TLS    : ENABLED
 vless://${VLESS_UUID}@${DOMAIN}:${XRAY_PORT}?encryption=none&security=tls&type=ws&path=${VLESS_PATH}#VLESS_8444
 
 --- VMESS ---
-${VMESS_LINK}
+vmess://$(echo -n "{\"v\":\"2\",\"ps\":\"VMESS_TLS_WS_8444\",\"add\":\"${DOMAIN}\",\"port\":\"${XRAY_PORT}\",\"id\":\"${VMESS_UUID}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${VMESS_PATH}\",\"tls\":\"tls\"}" | base64 -w0)
 
 --- TROJAN ---
 trojan://${TROJAN_PASS}@${DOMAIN}:${XRAY_PORT}?security=tls&type=ws&path=${TROJAN_PATH}#TROJAN_8444
@@ -1323,10 +1301,10 @@ ss://${SS_METHOD}:${SS_PASS}@${DOMAIN}:${XRAY_PORT}?plugin=v2ray-plugin;tls;host
 
 ===========================================
 EOF
+chmod 644 /var/www/html/xray_tls_ws.txt
 
-    chmod 644 /var/www/html/xray_tls_ws.txt
-    echo "Xray ALL protocols installed on port 8444"
-    echo "Config: https://${DOMAIN}:81/xray_tls_ws.txt"
+echo "✅ Installation complete. OpenVPN WS on port 80 is untouched."
+echo "Config: https://${DOMAIN}:81/xray_tls_ws.txt"
 }
 
 #====================================================
@@ -1550,17 +1528,17 @@ install_nginx_panel() {
     
     # Fix broken repositories first
     echo "Fixing repositories..."
-    rm -f /etc/apt/sources.list.d/openvpn3.list
     rm -f /etc/apt/sources.list.d/caddy-stable.list
     
     # Ensure main Ubuntu repositories are present
     if ! grep -q "^deb.*ubuntu.*main" /etc/apt/sources.list; then
+    
         cat > /etc/apt/sources.list << 'REPOEOF'
 deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
-deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
 REPOEOF
+
     fi
     
     # Install NGINX (show errors if any)
@@ -1590,7 +1568,7 @@ TLS    : ENABLED
 
 
 --- VMESS ---
-${VMESS_LINK}
+vmess://$(echo -n "{\"v\":\"2\",\"ps\":\"VMESS_TLS_WS_8444\",\"add\":\"${DOMAIN}\",\"port\":\"${XRAY_PORT}\",\"id\":\"${VMESS_UUID}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${VMESS_PATH}\",\"tls\":\"tls\"}" | base64 -w0)
 
 
 ===========================================
@@ -1972,7 +1950,6 @@ install_firewall_kvm
 install_stunnel
 install_hysteria2
 install_tuic
-install_tls_cert
 install_xray_tls_ws_all
 install_naiveproxy
 install_brook
@@ -1981,41 +1958,26 @@ install_rclocal
 setup_server_info
 start_service
 
-# Final iptables save to ensure all rules are persistent
-echo "Saving final iptables rules..."
+echo "[INFO] Persisting iptables rules and enabling IP forwarding..."
 
-# Ensure IP forwarding is enabled NOW and persists after reboot
-echo "Enabling IP forwarding..."
+# Enable IPv4 forwarding now and persistently
 sysctl -w net.ipv4.ip_forward=1
-if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-fi
+grep -qxF "net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 sysctl -p
 
+# Persist iptables rules
 if command -v netfilter-persistent &> /dev/null; then
     netfilter-persistent save
     netfilter-persistent reload
 else
-    echo "Installing netfilter-persistent..."
+    echo "[INFO] Installing netfilter-persistent..."
     DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent netfilter-persistent
     netfilter-persistent save
+    netfilter-persistent reload
 fi
 
-# Verify critical rules are in place
-echo "Verifying VPN internet access rules..."
-if ! iptables -t nat -L POSTROUTING -n | grep -q "MASQUERADE"; then
-    echo "WARNING: NAT MASQUERADE rules missing! Re-applying..."
-    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$server_interface" -j MASQUERADE
-    iptables -t nat -A POSTROUTING -o "$server_interface" -j MASQUERADE
-    netfilter-persistent save
-fi
+echo "[INFO] Firewall rules persisted successfully."
 
-if ! iptables -L FORWARD -n | grep -q "10.8.0.0/24"; then
-    echo "WARNING: FORWARD rules missing! Re-applying..."
-    iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT
-    iptables -I FORWARD -d 10.8.0.0/24 -j ACCEPT
-    netfilter-persistent save
-fi
 
 echo "✅ Installation complete!"
 echo "✅ VPN internet access configured"
