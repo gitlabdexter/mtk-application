@@ -12,7 +12,7 @@ const productData = [
     {
       id: 2,
       name: "MTK GENUINE V24",
-      image:"https://i.ibb.co/qLsDNCVN/icon-icon.png",
+      image:"https://i.ibb.co/7t6f2F7s/icon-icon.png",
       productType: "openBackHeadphones",
       description: ["OVPN", "UDP", "V2RAY"],
       rating: 5,
