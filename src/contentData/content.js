@@ -1,6 +1,6 @@
-// src/data/productData.js
+// src/contentData/content.js
 
-const productData = [
+const contents = [
   {
     id: 1,
     name: "MTK GENUINE PRO",
@@ -39,4 +39,4 @@ const productData = [
   },
 ];
 
-export default productData;
+export default contents;
