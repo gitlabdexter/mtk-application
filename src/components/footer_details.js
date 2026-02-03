@@ -1,12 +1,11 @@
-// src/components/footer_details.js
-import React from "react";
+import React from 'react';
 
-const FooterDetails = ({ siteName }) => {
+const FooterDetails = () => {
   return (
     <footer className="footer">
       <div className="footer-content">
-        <h2 className="footer-title">{siteName}</h2>
-        <p className="footer-copy">&copy; 2024 Dexter Eskalarte. All rights reserved.</p>
+        <h2 className="footer-title">Jio Tunnel Vpn</h2>
+        <p className="footer-copy">&copy; 2024 DexBuild. All rights reserved.</p>
       </div>
     </footer>
   );
