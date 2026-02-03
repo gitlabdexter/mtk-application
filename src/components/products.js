@@ -1,8 +1,7 @@
-// src/components/Products.js
 import { useState, useEffect } from "react";
 import { FaStar } from "react-icons/fa";
 
-export function Products({ id, image, name, description, appLink, rating, timeLeft }) {
+export function Products({ id, image, name, description, appLink, rating }) {
   const [downloads, setDownloads] = useState(0);
 
   // Load downloads from localStorage
@@ -52,8 +51,6 @@ export function Products({ id, image, name, description, appLink, rating, timeLe
               DOWNLOAD
             </button>
 
-            {/* ✅ Use timeLeft prop so ESLint won't complain */}
-            <p className="time-left">{timeLeft} days left</p>
             <p className="download-text">Client Downloads: {downloads}</p>
           </div>
         </div>
