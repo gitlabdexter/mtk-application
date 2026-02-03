@@ -1,6 +1,7 @@
-import React from 'react';
+// src/components/footer_details.js
+import React from "react";
 
-const FooterDetails = ({ siteName = "MEDIATEK VPN" }) => {
+const FooterDetails = ({ siteName }) => {
   return (
     <footer className="footer">
       <div className="footer-content">
