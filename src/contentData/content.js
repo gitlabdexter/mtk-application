@@ -20,8 +20,6 @@ const productData = [
     timeLeft: 24,
     appLink:
       "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkv24.apk",
-    // appLink:
-    //   "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkgenuine-release1.apk",
   },
   {
     id: 3,
