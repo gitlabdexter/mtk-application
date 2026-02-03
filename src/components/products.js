@@ -8,28 +8,27 @@ export function Products({
   description,
   appLink,
   rating,
-  timeLeft, // must be used
+  timeLeft,
 }) {
   const [downloads, setDownloads] = useState(0);
 
-  // Load downloads from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = localStorage.getItem(`downloads_${id}`);
     if (saved) setDownloads(Number(saved));
   }, [id]);
 
-  // Save downloads to localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem(`downloads_${id}`, downloads);
   }, [id, downloads]);
 
   const handleDownload = () => {
-    setDownloads((prev) => prev + 1);
+    setDownloads(prev => prev + 1);
     window.open(appLink, "_blank", "noopener,noreferrer");
   };
 
+  // Return must be inside the component function
   return (
     <div className="productList">
       <div className="productCard">
@@ -59,9 +58,7 @@ export function Products({
               DOWNLOAD
             </button>
 
-            {/* Use timeLeft here so ESLint is happy */}
             <p className="time-left">{timeLeft} days left</p>
-
             <p className="download-text">Client Downloads: {downloads}</p>
           </div>
         </div>
