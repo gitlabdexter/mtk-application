@@ -1,15 +1,17 @@
-import { Products } from './components/products';
-import contents from './contentData/content';
-import siteOptions from './contentData/siteOption';
-import CoverPage from './components/cover_page';
-import FooterDetails from './components/footer_details';
+// src/App.js
+import React from "react";
+import { Products } from "./components/Products";
+import contents from "./contentData/content";
+import siteOptions from "./contentData/siteOption";
+import CoverPage from "./components/cover_page";
+import FooterDetails from "./components/footer_details";
 
 export default function App() {
   return (
     <>
-      {/* Render cover page(s) */}
+      {/* Render Cover Page */}
       {siteOptions.map(option => (
-        <CoverPage 
+        <CoverPage
           key={option.id}
           image={option.image}
           siteName={option.siteName}
@@ -18,23 +20,23 @@ export default function App() {
         />
       ))}
 
-      {/* Render product list */}
-      <div className='AppContainer'>
+      {/* Render Product List */}
+      <div className="AppContainer">
         {contents.map(item => (
-          <Products 
+          <Products
             key={item.id}
-            id={item.id}                     // ✅ pass id so downloads are tracked
+            id={item.id}
             image={item.image}
             name={item.name}
             description={item.description}
             appLink={item.appLink}
-            timeLeft={item.timeLeft}
             rating={item.rating}
+            timeLeft={item.timeLeft}
           />
         ))}
       </div>
 
-      {/* Render footer - use first siteOption only */}
+      {/* Footer */}
       {siteOptions.length > 0 && (
         <FooterDetails siteName={siteOptions[0].siteName} />
       )}
