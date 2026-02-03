@@ -28,7 +28,17 @@ const productData = [
       description: ["OVPN"],
       rating: 5,
       timeLeft: 24,
-      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/MediatekOvpn.apk?inline=false"
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/MediatekOvpn.apk"
+        },
+    {
+      id: 4,
+      name: "MTK DITO APP",
+      image:"https://i.ibb.co/dsBK8FTw/app-main-logo.png",
+      productType: "openBackHeadphones",
+      description: ["OVPN"],
+      rating: 5,
+      timeLeft: 24,
+      appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/ditomtk.apk"
     }
    // {
    //   id: 3,
