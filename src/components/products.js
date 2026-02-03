@@ -1,23 +1,18 @@
+// src/components/Products.js
 import { useState, useEffect } from "react";
 import { FaStar } from "react-icons/fa";
 
-export function Products({
-  id,
-  image,
-  name,
-  description,
-  appLink,
-  rating,
-  timeLeft,
-}) {
+export function Products({ id, image, name, description, appLink, rating, timeLeft }) {
   const [downloads, setDownloads] = useState(0);
 
+  // Load downloads from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = localStorage.getItem(`downloads_${id}`);
     if (saved) setDownloads(Number(saved));
   }, [id]);
 
+  // Save downloads to localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem(`downloads_${id}`, downloads);
@@ -28,7 +23,6 @@ export function Products({
     window.open(appLink, "_blank", "noopener,noreferrer");
   };
 
-  // Return must be inside the component function
   return (
     <div className="productList">
       <div className="productCard">
