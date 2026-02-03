@@ -1,25 +1,15 @@
-import React from 'react'
+// src/components/cover_page.js
+import React from "react";
 
-const cover_page = (props) => {
+const CoverPage = ({ image, siteName, description, siteLink }) => {
   return (
-    <div key={props.id}>
-     <div className="navbar">
-        <div className="logo">{props.siteName}</div>
-    </div>
-    
-    <div className="container">
-            <img src={props.image} alt="MEDIATEK VPN Logo"/>
-            <div className="title">{props.siteName}</div>
-            <div className="subtitle">{props.description}</div>
-            <div className='displayStack__2'>
-            <a className='appLink' href={props.siteLink}>
-            <button className='productTime'>PANEL LINK</button>
-            </a>
-          </div>
-    </div>
-    <div className='app_title'>OUR VPN LIST</div>
-    </div>
-  )
-}
+    <section className="coverPage">
+      <img src={image} alt={`${siteName} logo`} className="cover-image" />
+      <h1>{siteName}</h1>
+      <p>{description}</p>
+      <a href={siteLink} target="_blank" rel="noopener noreferrer">Visit Site</a>
+    </section>
+  );
+};
 
-export default cover_page
+export default CoverPage;
