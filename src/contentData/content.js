@@ -14,7 +14,7 @@ const productData = [
     name: "MTK TUNNEL V24",
     image: "https://i.ibb.co/7t6f2F7s/icon-icon.png",
     productType: "openBackHeadphones",
-    description: ["OVPN", "UDP", "V2RAY"],
+    description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
     rating: 5,
     timeLeft: 24,
     appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkv24.apk"
@@ -44,7 +44,7 @@ const productData = [
     name: "MTK XRAY",
     image: "https://i.ibb.co/dsBK8FTw/app-main-logo.png",
     productType: "openBackHeadphones",
-    description: ["OVPN"],
+    description: ["XRAY"],
     rating: 5,
     timeLeft: 24,
     appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkxray.apk"
