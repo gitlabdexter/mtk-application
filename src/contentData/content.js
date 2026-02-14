@@ -42,7 +42,7 @@ const productData = [
   {
     id: 4,
     name: "MTK XRAY",
-    image: "https://i.ibb.co/dsBK8FTw/app-main-logo.png",
+    image: "https://i.ibb.co/TDgg3Hsd/app-main-logo.png",
     productType: "openBackHeadphones",
     description: ["XRAY"],
     rating: 5,
