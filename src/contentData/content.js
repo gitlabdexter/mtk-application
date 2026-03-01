@@ -37,7 +37,7 @@ const productData = [
     description: ["OVPN"],
     rating: 5,
     timeLeft: 24,
-    appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/ditomtk.apk"
+    appLink: "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/bluepanel/mtkdito_update.apk"
  },
   {
     id: 4,
