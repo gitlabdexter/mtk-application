@@ -11,13 +11,13 @@ const productData = [
   },
   {
    id: 2,
-    name: "MTK TUNNEL V24",
-    image: "https://i.ibb.co/7t6f2F7s/icon-icon.png",
+    name: "SHIELD MTK",
+    image: "https://i.ibb.co/XfTbcLTB/icon-icon.png",
     productType: "openBackHeadphones",
     description: ["OVPN", "UDP", "V2RAY", "SSH", "SLOWDNS"],
     rating: 5,
     timeLeft: 24,
-    appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkv24.apk"
+    appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/shieldmtk-release.apk"
   },
   {
      id: 3,
@@ -37,7 +37,7 @@ const productData = [
     description: ["OVPN"],
     rating: 5,
     timeLeft: 24,
-    appLink: "https://gitlab.com/dextereskalarte/Mtk-dev/-/raw/main/authentication/bluepanel/mtkdito_update.apk"
+    appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkditoapp-release.apk"
  },
   {
     id: 4,
