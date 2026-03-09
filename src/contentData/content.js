@@ -40,7 +40,7 @@ const productData = [
     appLink: "https://gitlab.com/mtkdev1/dextereskalarte/-/raw/main/mtkditoapp-release.apk"
  },
   {
-    id: 4,
+    id: 5,
     name: "MTK XRAY",
     image: "https://i.ibb.co/TDgg3Hsd/app-main-logo.png",
     productType: "openBackHeadphones",
